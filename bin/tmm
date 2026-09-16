@@ -88,57 +88,62 @@ cmd_close() {
   fi
 }
 cmd_list() {
-  data="$(fetch "$BASE/guides.json")"
+  # Catalog source: /llms.txt is open; /guides.json needs a site key (401).
+  data="$(fetch "$BASE/llms.txt")"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -c '
-import json, sys
-raw = json.load(sys.stdin)
-guides = raw if isinstance(raw, list) else [g for c in raw.get("categories", []) for g in c.get("guides", [])] or raw.get("guides", [])
-for g in guides:
-    print("%s - %s" % (g.get("slug", "?"), g.get("title", "")))'
-  elif command -v jq >/dev/null 2>&1; then
-    printf '%s' "$data" | jq -r 'if type == "array" then .[] | "\(.slug) - \(.title)" else .categories[].guides[] | "\(.slug) - \(.title)" end'
+import re, sys
+for line in sys.stdin:
+    m = re.match(r"- \[(.+)\]\(/guides/([^)]+)\)", line.strip())
+    if m:
+        print("%s - %s" % (m.group(2), m.group(1)))'
   else
-    printf '%s\n' "$data"
+    printf '%s\n' "$data" | grep -o "\[.*\](/guides/[^)]*)" || true
   fi
 }
 cmd_random() {
-  data="$(fetch "$BASE/guides.json")"
+  data="$(fetch "$BASE/llms.txt")"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -c '
-import json, random, sys
-raw = json.load(sys.stdin)
-guides = raw if isinstance(raw, list) else [g for c in raw.get("categories", []) for g in c.get("guides", [])] or raw.get("guides", [])
-g = random.choice(guides)
-print("%s - %s" % (g.get("slug", "?"), g.get("title", "")))'
-  elif command -v jq >/dev/null 2>&1 && command -v shuf >/dev/null 2>&1; then
-    printf '%s' "$data" | jq -r 'if type == "array" then .[] | "\(.slug) - \(.title)" else .categories[].guides[] | "\(.slug) - \(.title)" end' | shuf -n 1
+import random, re, sys
+guides = []
+for line in sys.stdin:
+    m = re.match(r"- \[(.+)\]\(/guides/([^)]+)\)", line.strip())
+    if m:
+        guides.append((m.group(2), m.group(1)))
+slug, title = random.choice(guides)
+print("%s - %s" % (slug, title))'
+  elif command -v shuf >/dev/null 2>&1; then
+    printf '%s\n' "$data" | grep -o "\[.*\](/guides/[^)]*)" | shuf -n 1 || true
   else
-    echo "tmm: random requires python3 (or jq+shuf)" >&2; exit 1
+    echo "tmm: random requires python3 (or shuf)" >&2; exit 1
   fi
 }
 cmd_categories() {
-  data="$(fetch "$BASE/guides.json")"
+  data="$(fetch "$BASE/llms.txt")"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -c '
-import json, sys
-raw = json.load(sys.stdin)
-if isinstance(raw, list):
-    print("\n".join(sorted({str(g.get("category", "")) for g in raw if g.get("category")})))
-else:
-    print("\n".join(sorted(c.get("slug", "") for c in raw.get("categories", []))))'
-  elif command -v jq >/dev/null 2>&1; then
-    printf '%s' "$data" | jq -r 'if type == "array" then [.[].category // empty] | unique[] else .categories[].slug end'
+import sys
+cats = []
+for line in sys.stdin:
+    if line.startswith("## "):
+        name = line[3:].strip()
+        if name != "When to use this":
+            cats.append(name)
+print("\n".join(cats))'
   else
-    printf '%s\n' "$data"
+    printf '%s\n' "$data" | grep "^## " | sed "s/^## //" || true
   fi
 }
 cmd_cheat() {
-  data="$(fetch "$BASE/cheat-sheet.json")"
+  # /cheat-sheet.json needs a site key (401) on the public host.
+  if ! data="$(fetch "$BASE/cheat-sheet.json" 2>/dev/null)"; then
+    echo "tmm: cheat sheet needs a site key on the public host." >&2
+    echo "tmm: try 'tmm search cheatsheet' or read a guide instead." >&2
+    exit 1
+  fi
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -m json.tool
-  elif command -v jq >/dev/null 2>&1; then
-    printf '%s' "$data" | jq .
   else
     printf '%s\n' "$data"
   fi

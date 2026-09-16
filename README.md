@@ -124,13 +124,15 @@ TMM_BASE=http://localhost:5173 tmm search "networks"
 
 | Action | Endpoint | File |
 |--------|----------|------|
-| search | `GET /search.json?q=&limit=` | `Service.qml`, `Model.js` |
-| catalog | `GET /guides.json` | `Service.qml`, `Overlay.qml` catalog mode |
-| open guide | `GET /api/guides/:slug` | `Service.qml` |
-| read phase | `GET /guides/:slug/:phase.md` | `Service.qml`, `bin/tmm` |
-| cheat sheet | `GET /cheat-sheet.json` | `Service.qml`, `tmm cheat` |
-| full offline corpus | `GET /llms-full.txt` | `Model.js` helper |
+| search | `GET /search.json?q=&limit=` (open) | `Service.qml`, `Model.js` |
+| catalog | `GET /llms.txt` parsed locally (open) | `Service.qml`, `Model.js`, `Overlay.qml` catalog mode |
+| open guide | `GET /guides/:slug.md` full markdown (open) | `Service.qml` |
+| read phase | `GET /guides/:slug/:phase.md` (open) | `Service.qml`, `bin/tmm` |
+| offline book | `GET /guides/:slug/epub` (open) | `tmm offline` |
+| full offline corpus | `GET /llms-full.txt` (open) | `Model.js` helper |
 | close | local only, clears overlay state | `Overlay.qml`, `tmm close` |
+
+Note: `/guides.json`, `/cheat-sheet.json`, and `/api/*` need a site key or self hosted API, so the plugin avoids them on the public host. `tmm cheat` explains this and points at search instead.
 
 Repo layout:
 

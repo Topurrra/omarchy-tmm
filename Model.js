@@ -19,7 +19,8 @@ function phaseMarkdownUrl(slug, phase) {
 }
 
 function catalogUrl() {
-    return API_BASE + "/guides.json";
+    // /llms.txt is open; /guides.json needs a site key on the public host.
+    return API_BASE + "/llms.txt";
 }
 
 function cheatSheetUrl() {
@@ -38,6 +39,20 @@ function cacheKeyFor(slug, phase) {
 function stripFrontmatter(md) {
     if (!md) return md;
     return md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+// Parse /llms.txt into [{title, slug, category}].
+// Lines look like: "## Category" then "- [Title](/guides/slug)".
+function parseLlmsCatalog(text) {
+    var out = [], category = "";
+    var lines = String(text || "").split("\n");
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (line.indexOf("## ") === 0) { category = line.slice(3).trim(); continue; }
+        var m = /^-\s*\[(.+)\]\(\/guides\/([^)]+)\)/.exec(line);
+        if (m) out.push({ title: m[1], slug: m[2], category: category });
+    }
+    return out;
 }
 
 // Random element of an array (phases, guides, ...). undefined when empty.

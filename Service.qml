@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import QtCore
+import "Model.js" as Model
 
 // Headless data service for tmm.manual (Omarchy v4 Quattro).
 // Host injects `shell` and `manifest`. No UI: data functions only.
@@ -45,13 +46,17 @@ Item {
     }
 
     function getGuide(slug) {
+        // Full-guide markdown is open; /api/guides/* is not public.
+        // Emits guideDone({slug, markdown}).
         _guideSlug = slug;
         _run(guideProc, ["curl", "-fsSL",
-            _url("/api/guides/" + encodeURIComponent(slug))]);
+            _url("/guides/" + encodeURIComponent(slug) + ".md")]);
     }
 
     function getCatalog() {
-        _run(catalogProc, ["curl", "-fsSL", _url("/guides.json")]);
+        // /llms.txt is open; /guides.json needs a site key (401).
+        // Emits catalogDone([{title, slug, summary: category}]).
+        _run(catalogProc, ["curl", "-fsSL", _url("/llms.txt")]);
     }
 
     function getCheatSheet() {
@@ -86,8 +91,8 @@ Item {
         id: guideProc
         stdout: StdioCollector {
             onStreamFinished: {
-                try { root.guideDone(JSON.parse(text)); }
-                catch (e) { root.error("guide parse failed: " + e); }
+                if (text.length > 0) root.guideDone({ "slug": root._guideSlug, "markdown": text });
+                else root.error("guide empty: " + root._guideSlug);
             }
         }
         stderr: StdioCollector {}
@@ -98,8 +103,15 @@ Item {
         id: catalogProc
         stdout: StdioCollector {
             onStreamFinished: {
-                try { root.catalogDone(JSON.parse(text)); }
-                catch (e) { root.error("catalog parse failed: " + e); }
+                try {
+                    var parsed = Model.parseLlmsCatalog(text);
+                    var mapped = [];
+                    for (var i = 0; i < parsed.length; i++) {
+                        mapped.push({ "title": parsed[i].title, "slug": parsed[i].slug,
+                            "summary": parsed[i].category });
+                    }
+                    root.catalogDone(mapped);
+                } catch (e) { root.error("catalog parse failed: " + e); }
             }
         }
         stderr: StdioCollector {}
@@ -115,7 +127,7 @@ Item {
             }
         }
         stderr: StdioCollector {}
-        onExited: code => { if (code !== 0) root.error("cheat-sheet fetch failed"); }
+        onExited: code => { if (code !== 0) root.error("cheat sheet needs a site key; use search instead"); }
     }
 
     Process {
