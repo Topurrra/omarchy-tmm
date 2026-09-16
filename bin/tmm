@@ -1,85 +1,271 @@
 #!/bin/sh
 # tmm - TheMissingManual CLI client.
-# Env: TMM_BASE (default https://themissingmanual.dev), PAGER, XDG_CACHE_HOME.
+# Env: TMM_BASE (default https://themissingmanual.dev), PAGER, NO_COLOR,
+#      XDG_CACHE_HOME, XDG_STATE_HOME.
 set -eu
+
 BASE="${TMM_BASE:-https://themissingmanual.dev}"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmm"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
+RECENTS="$STATE_DIR/tmm-recents.json"
+
 command -v curl >/dev/null 2>&1 || { echo "tmm: curl is required but not installed" >&2; exit 1; }
+
+# ----------------------------------------------------------------- color
+#
+# Color when stdout is a terminal and NO_COLOR is unset. `render` is told
+# explicitly whether to colorize, because it usually writes into a pager.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  C_RESET=$(printf '\033[0m');  C_BOLD=$(printf '\033[1m')
+  C_DIM=$(printf '\033[2m');    C_ACCENT=$(printf '\033[36m')
+  C_TITLE=$(printf '\033[1;37m'); C_WARN=$(printf '\033[33m')
+else
+  C_RESET=''; C_BOLD=''; C_DIM=''; C_ACCENT=''; C_TITLE=''; C_WARN=''
+fi
+
+say_err() { printf '%s%s%s\n' "$C_WARN" "$1" "$C_RESET" >&2; }
+
 fetch() { curl -fsSL --retry 2 --max-time 30 "$1"; }
+
+TMPFILE=""
+cleanup() { [ -n "$TMPFILE" ] && rm -f "$TMPFILE"; return 0; }
+trap cleanup EXIT HUP INT TERM
+# Stash stdin-ish data in a file so python can take its script from a heredoc
+# and its input from argv at the same time.
+stash() {
+  [ -n "$TMPFILE" ] || TMPFILE="$(mktemp "${TMPDIR:-/tmp}/tmm.XXXXXX")"
+  printf '%s' "$1" > "$TMPFILE"
+  printf '%s' "$TMPFILE"
+}
+
 usage() {
-cat <<'EOF'
-Usage: tmm <command> [args]
-  search [query]      Search guides (prints "slug/phase - title")
-  open <slug>[/phase] Fetch phase .md to pager (cached ~/.cache/tmm/)
-  read <slug> <phase> Same as open but print to stdout
-  close               Stop tmm open pager processes (client-side)
-  list                List all guides from /guides.json
-  random              Print one random guide
-  categories          List category slugs
-  cheat               Print cheat-sheet JSON
-  offline <slug>      Download /guides/<slug>/epub to cache
-Env: TMM_BASE (default https://themissingmanual.dev)
+cat <<EOF
+${C_TITLE}tmm${C_RESET} - The Missing Manual, from your terminal.
+
+${C_BOLD}Usage:${C_RESET} tmm <command> [args]
+
+  ${C_ACCENT}search${C_RESET} [query]       Search guides; prints "slug/phase  title"
+  ${C_ACCENT}open${C_RESET} <slug>[/phase]  Read a phase in your pager (rendered)
+  ${C_ACCENT}read${C_RESET} <slug> [phase]  Same, but straight to stdout
+  ${C_ACCENT}list${C_RESET}                 Every guide in the catalog
+  ${C_ACCENT}categories${C_RESET}           Category names
+  ${C_ACCENT}random${C_RESET}               One random guide
+  ${C_ACCENT}recent${C_RESET}               Phases you last read (shared with the overlay)
+  ${C_ACCENT}cheat${C_RESET}                Cheat-sheet JSON (needs a site key)
+  ${C_ACCENT}offline${C_RESET} <slug>       Download the EPUB into the cache
+  ${C_ACCENT}close${C_RESET}                Stop pagers started by "tmm open"
+
+${C_BOLD}Examples:${C_RESET}
+  tmm search "git rebase"
+  tmm open git-from-zero/2
+  TMM_BASE=http://localhost:5173 tmm list
+
+Cache: $CACHE_DIR
 EOF
 }
+
 split_slug_phase() {
   case "$1" in
     */*) printf '%s %s\n' "${1%%/*}" "${1#*/}" ;;
-    *) printf '%s %s\n' "$1" "${2:-}" ;;
+    *) printf '%s %s\n' "$1" "${2:-1}" ;;
   esac
 }
+
+# ----------------------------------------------------------------- render
+#
+# Markdown -> ANSI. Mirrors what the overlay's reader draws, so a phase looks
+# the same whether you open it on the desktop or in a terminal. Falls back to
+# the raw markdown when python3 is missing.
+render() {
+  # $1: file, $2: "color" or "plain"
+  if ! command -v python3 >/dev/null 2>&1; then
+    cat "$1"
+    return
+  fi
+  TMM_COLOR="$2" python3 - "$1" <<'PY'
+import os, re, sys
+
+color = os.environ.get("TMM_COLOR") == "color"
+def c(code, s):
+    return f"\033[{code}m{s}\033[0m" if color else s
+
+raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+raw = re.sub(r"^---\r?\n.*?\r?\n---\r?\n?", "", raw, flags=re.S)
+
+def spans(s):
+    s = re.sub(r"`([^`]+)`", lambda m: c("36", m.group(1)), s)
+    s = re.sub(r"\*\*([^*]+)\*\*", lambda m: c("1", m.group(1)), s)
+    s = re.sub(r"\[([^\]]*)\]\(([^)]+)\)",
+               lambda m: f"{c('4', m.group(1))} {c('2', '(' + m.group(2) + ')')}", s)
+    return s
+
+out, in_code = [], False
+for line in raw.split("\n"):
+    fence = re.match(r"^\s*(```|~~~)\s*([A-Za-z0-9_+.#-]*)", line)
+    if fence:
+        if not in_code:
+            in_code = True
+            lang = fence.group(2)
+            if lang:
+                out.append(c("2", f"  ┌─ {lang}"))
+        else:
+            in_code = False
+        continue
+    if in_code:
+        out.append("  " + c("2", "│ ") + line)
+        continue
+
+    h = re.match(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*$", line)
+    if h:
+        level, text = len(h.group(1)), h.group(2)
+        out.append("")
+        out.append(c("1;36" if level <= 2 else "1", text))
+        if level <= 2:
+            out.append(c("2", "─" * min(len(text), 60)))
+        continue
+
+    if re.match(r"^\s{0,3}([-*_])\s*(\1\s*){2,}$", line):
+        out.append(c("2", "─" * 60))
+        continue
+
+    q = re.match(r"^\s{0,3}>\s?(.*)$", line)
+    if q:
+        out.append(c("2", "│ ") + c("3", spans(q.group(1))))
+        continue
+
+    if line.lstrip().startswith("|"):
+        # Leave table rows verbatim: stripping backticks would shift the
+        # columns out of alignment.
+        out.append(c("2", line))
+        continue
+
+    b = re.match(r"^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$", line)
+    if b:
+        indent = " " * (len(b.group(1)) + 2)
+        marker = b.group(2) if b.group(2)[0].isdigit() else "•"
+        out.append(f"{indent}{c('36', marker)} {spans(b.group(3))}")
+        continue
+
+    out.append(spans(line) if line.strip() else "")
+
+sys.stdout.write("\n".join(out) + "\n")
+PY
+}
+
 cmd_search() {
   q="${1:-}"
-  # Real shape: {hits:[{guide_slug,phase_no,title,summary}], suggestion}
+  [ -n "$q" ] || { say_err "tmm: usage: tmm search <query>"; exit 1; }
   q_enc="$q"
-  if command -v python3 >/dev/null 2>&1 && [ -n "$q" ]; then
+  if command -v python3 >/dev/null 2>&1; then
     q_enc="$(printf '%s' "$q" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))')"
   fi
-  data="$(fetch "$BASE/search.json?q=$q_enc")"
+  data="$(fetch "$BASE/search.json?q=$q_enc&limit=20")"
   if command -v python3 >/dev/null 2>&1; then
-    printf '%s' "$data" | python3 -c '
-import json, sys
-raw = json.load(sys.stdin)
+    f="$(stash "$data")"
+    TMM_A="$C_ACCENT" TMM_D="$C_DIM" TMM_R="$C_RESET" python3 - "$f" <<'PY'
+import json, os, sys
+A = os.environ.get("TMM_A", "")
+D = os.environ.get("TMM_D", "")
+R = os.environ.get("TMM_R", "")
+try:
+    raw = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    sys.exit("tmm: could not read the search response")
 items = raw.get("hits", raw) if isinstance(raw, dict) else raw
 if isinstance(items, dict):
     items = items.get("results", items.get("items", []))
-for it in items:
+rows = []
+for it in items or []:
     slug = it.get("guide_slug", it.get("slug", "?"))
     ph = it.get("phase_no", it.get("phase", it.get("no", "")))
-    left = slug + ("/" + str(ph) if ph != "" and ph is not None else "")
-    print("%s - %s" % (left, it.get("title", "")))
-if isinstance(raw, dict) and raw.get("suggestion"):
-    print("Did you mean: %s" % raw["suggestion"])'
+    ref = f"{slug}/{ph}" if ph not in ("", None) else str(slug)
+    rows.append((ref, it.get("title", "")))
+width = max((len(r[0]) for r in rows), default=0)
+for ref, title in rows:
+    print(f"{A}{ref.ljust(width)}{R}  {title}")
+suggestion = raw.get("suggestion") if isinstance(raw, dict) else None
+if not rows:
+    print("no matches", file=sys.stderr)
+if suggestion:
+    print(f"{D}did you mean:{R} {suggestion}", file=sys.stderr)
+PY
   elif command -v jq >/dev/null 2>&1; then
-    printf '%s' "$data" | jq -r '(.hits // .) | .[] | "\(.guide_slug // .slug)/\(.phase_no // .phase // "") - \(.title)"'
+    printf '%s' "$data" | jq -r '(.hits // .) | .[] | "\(.guide_slug // .slug)/\(.phase_no // .phase // "")  \(.title)"'
   else
     printf '%s\n' "$data"
   fi
 }
+
 fetch_phase() {
   if [ -z "$1" ] || [ -z "$2" ]; then
-    echo "tmm: usage: tmm open <slug>/<phase>" >&2; exit 1
+    say_err "tmm: usage: tmm open <slug>/<phase>"; exit 1
   fi
   mkdir -p "$CACHE_DIR"
   dest="$CACHE_DIR/$1-$2.md"
-  fetch "$BASE/guides/$1/$2.md" > "$dest.tmp"
+  if ! fetch "$BASE/guides/$1/$2.md" > "$dest.tmp" 2>/dev/null; then
+    rm -f "$dest.tmp"
+    # Offline: fall back to a previously cached copy rather than failing.
+    [ -s "$dest" ] || { say_err "tmm: could not fetch $1/$2 and nothing is cached"; exit 1; }
+    printf '%s\n' "$dest"
+    return
+  fi
   mv "$dest.tmp" "$dest"
   printf '%s\n' "$dest"
 }
+
+remember() {
+  # Append to the same recents file the overlay reads, so the desktop and the
+  # terminal share one history. $3 is the phase file, used for its title.
+  command -v python3 >/dev/null 2>&1 || return 0
+  mkdir -p "$STATE_DIR"
+  TMM_SLUG="$1" TMM_PHASE="$2" TMM_FILE="$RECENTS" TMM_MD="${3:-}" python3 - <<'PY' 2>/dev/null || true
+import json, os, re, time
+path, slug, phase = os.environ["TMM_FILE"], os.environ["TMM_SLUG"], int(os.environ["TMM_PHASE"])
+
+title = slug
+md = os.environ.get("TMM_MD", "")
+if md and os.path.exists(md):
+    body = re.sub(r"^---\r?\n.*?\r?\n---\r?\n?", "",
+                  open(md, encoding="utf-8", errors="replace").read(), flags=re.S)
+    heading = re.search(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*$", body, flags=re.M)
+    if heading:
+        title = heading.group(1).strip()
+try:
+    items = json.load(open(path))
+    if not isinstance(items, list):
+        items = []
+except Exception:
+    items = []
+items = [i for i in items if not (i.get("slug") == slug and i.get("phase") == phase)]
+items.insert(0, {"slug": slug, "phase": phase, "title": title, "at": int(time.time() * 1000)})
+tmp = path + ".tmp"
+with open(tmp, "w") as fh:
+    json.dump(items[:12], fh)
+os.replace(tmp, path)
+PY
+}
+
 cmd_open() {
-  if [ $# -lt 1 ]; then echo "tmm: usage: tmm open <slug>[/phase]" >&2; exit 1; fi
+  [ $# -ge 1 ] || { say_err "tmm: usage: tmm open <slug>[/phase]"; exit 1; }
   # shellcheck disable=SC2046
   set -- $(split_slug_phase "$1" "${2:-}")
   path="$(fetch_phase "$1" "$2")"
+  remember "$1" "$2" "$path"
+  pager="${PAGER:-less -R}"
+  # Color is on because the output goes to a pager we control.
   # shellcheck disable=SC2086
-  exec ${PAGER:-less} "$path"
+  render "$path" color | $pager
 }
+
 cmd_read() {
-  if [ $# -lt 1 ]; then echo "tmm: usage: tmm read <slug> <phase>" >&2; exit 1; fi
+  [ $# -ge 1 ] || { say_err "tmm: usage: tmm read <slug> [phase]"; exit 1; }
   # shellcheck disable=SC2046
   set -- $(split_slug_phase "$1" "${2:-}")
   path="$(fetch_phase "$1" "$2")"
-  cat "$path"
+  remember "$1" "$2" "$path"
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then render "$path" color; else render "$path" plain; fi
 }
+
 cmd_close() {
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "tmm open" || echo "tmm: no open tmm pager found"
@@ -87,22 +273,39 @@ cmd_close() {
     echo "tmm: pkill not found; run: pkill -f 'tmm open'"
   fi
 }
+
+# Catalog commands share one /llms.txt fetch shape.
+catalog_raw() { fetch "$BASE/llms.txt"; }
+
 cmd_list() {
-  # Catalog source: /llms.txt is open; /guides.json needs a site key (401).
-  data="$(fetch "$BASE/llms.txt")"
+  data="$(catalog_raw)"
   if command -v python3 >/dev/null 2>&1; then
-    printf '%s' "$data" | python3 -c '
-import re, sys
-for line in sys.stdin:
-    m = re.match(r"- \[(.+)\]\(/guides/([^)]+)\)", line.strip())
+    f="$(stash "$data")"
+    TMM_A="$C_ACCENT" TMM_D="$C_DIM" TMM_R="$C_RESET" python3 - "$f" <<'PY'
+import os, re, sys
+A = os.environ.get("TMM_A", "")
+D = os.environ.get("TMM_D", "")
+R = os.environ.get("TMM_R", "")
+rows, category = [], ""
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if line.startswith("## "):
+        category = line[3:].strip()
+        continue
+    m = re.match(r"- \[(.+)\]\(/guides/([^)]+)\)", line)
     if m:
-        print("%s - %s" % (m.group(2), m.group(1)))'
+        rows.append((m.group(2), m.group(1), category))
+width = max((len(r[0]) for r in rows), default=0)
+for slug, title, cat in rows:
+    print(f"{A}{slug.ljust(width)}{R}  {title}  {D}{cat}{R}")
+PY
   else
     printf '%s\n' "$data" | grep -o "\[.*\](/guides/[^)]*)" || true
   fi
 }
+
 cmd_random() {
-  data="$(fetch "$BASE/llms.txt")"
+  data="$(catalog_raw)"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -c '
 import random, re, sys
@@ -111,35 +314,55 @@ for line in sys.stdin:
     m = re.match(r"- \[(.+)\]\(/guides/([^)]+)\)", line.strip())
     if m:
         guides.append((m.group(2), m.group(1)))
+if not guides:
+    sys.exit("tmm: catalog was empty")
 slug, title = random.choice(guides)
-print("%s - %s" % (slug, title))'
+print("%s  %s" % (slug, title))'
   elif command -v shuf >/dev/null 2>&1; then
     printf '%s\n' "$data" | grep -o "\[.*\](/guides/[^)]*)" | shuf -n 1 || true
   else
-    echo "tmm: random requires python3 (or shuf)" >&2; exit 1
+    say_err "tmm: random requires python3 (or shuf)"; exit 1
   fi
 }
+
 cmd_categories() {
-  data="$(fetch "$BASE/llms.txt")"
+  data="$(catalog_raw)"
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "$data" | python3 -c '
 import sys
-cats = []
 for line in sys.stdin:
     if line.startswith("## "):
         name = line[3:].strip()
         if name != "When to use this":
-            cats.append(name)
-print("\n".join(cats))'
+            print(name)'
   else
     printf '%s\n' "$data" | grep "^## " | sed "s/^## //" || true
   fi
 }
+
+cmd_recent() {
+  [ -s "$RECENTS" ] || { echo "tmm: nothing read yet"; return 0; }
+  if command -v python3 >/dev/null 2>&1; then
+    TMM_A="$C_ACCENT" TMM_R="$C_RESET" python3 - "$RECENTS" <<'PY'
+import json, os, sys
+A, R = os.environ.get("TMM_A",""), os.environ.get("TMM_R","")
+try:
+    items = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit("tmm: recents file is unreadable")
+for i in items if isinstance(items, list) else []:
+    print(f"{A}{i.get('slug','?')}/{i.get('phase','?')}{R}  {i.get('title','')}")
+PY
+  else
+    cat "$RECENTS"
+  fi
+}
+
 cmd_cheat() {
   # /cheat-sheet.json needs a site key (401) on the public host.
   if ! data="$(fetch "$BASE/cheat-sheet.json" 2>/dev/null)"; then
-    echo "tmm: cheat sheet needs a site key on the public host." >&2
-    echo "tmm: try 'tmm search cheatsheet' or read a guide instead." >&2
+    say_err "tmm: the cheat sheet needs a site key on the public host."
+    say_err "tmm: try 'tmm search cheatsheet' or read a guide instead."
     exit 1
   fi
   if command -v python3 >/dev/null 2>&1; then
@@ -148,14 +371,16 @@ cmd_cheat() {
     printf '%s\n' "$data"
   fi
 }
+
 cmd_offline() {
-  if [ $# -lt 1 ]; then echo "tmm: usage: tmm offline <slug>" >&2; exit 1; fi
+  [ $# -ge 1 ] || { say_err "tmm: usage: tmm offline <slug>"; exit 1; }
   mkdir -p "$CACHE_DIR"
   dest="$CACHE_DIR/$1.epub"
   fetch "$BASE/guides/$1/epub" > "$dest.tmp"
   mv "$dest.tmp" "$dest"
   echo "$dest"
 }
+
 cmd="${1:-}"; if [ $# -gt 0 ]; then shift; fi
 case "$cmd" in
   search) cmd_search "$@" ;;
@@ -165,8 +390,9 @@ case "$cmd" in
   list) cmd_list ;;
   random) cmd_random ;;
   categories) cmd_categories ;;
+  recent|recents) cmd_recent ;;
   cheat) cmd_cheat ;;
   offline) cmd_offline "$@" ;;
   -h|--help|help|"") usage ;;
-  *) echo "tmm: unknown command: $cmd" >&2; usage >&2; exit 1 ;;
+  *) say_err "tmm: unknown command: $cmd"; usage >&2; exit 1 ;;
 esac

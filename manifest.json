@@ -2,11 +2,17 @@
   "schemaVersion": 1,
   "id": "tmm.manual",
   "name": "The Missing Manual",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "The Missing Manual",
   "license": "MIT",
-  "description": "Search, open, read and close guides from The Missing Manual inside Omarchy",
-  "kinds": ["overlay", "service"],
+  "description": "Search, browse and read The Missing Manual inside Omarchy, themed to your desktop",
+  "kinds": [
+    "overlay",
+    "service"
+  ],
   "keepLoaded": true,
-  "entryPoints": { "overlay": "Overlay.qml", "service": "Service.qml" }
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "service": "Service.qml"
+  }
 }
