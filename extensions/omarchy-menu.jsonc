@@ -9,9 +9,9 @@
   },
   "tmm.guides": {
     "label": "Search Guides",
-    "description": "Search TheMissingManual guides",
+    "description": "Search TheMissingManual guides (Esc closes)",
     "icon": "search",
-    "action": "omarchy-shell tmm.manual open"
+    "action": "omarchy-shell shell summon tmm.manual"
   },
   "tmm.random": {
     "label": "Random Guide",
@@ -20,10 +20,10 @@
     "action": "tmm random"
   },
   "tmm.close": {
-    "label": "Close Manual",
-    "description": "Close the open manual pager",
+    "label": "Toggle Manual",
+    "description": "Toggle the Missing Manual overlay",
     "icon": "x",
-    "action": "omarchy-shell tmm.manual close"
+    "action": "omarchy-shell shell toggle tmm.manual"
   },
   "tmm.cheat": {
     "label": "Cheat Sheet",

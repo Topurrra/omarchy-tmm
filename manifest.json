@@ -7,5 +7,6 @@
   "license": "MIT",
   "description": "Search, open, read and close guides from The Missing Manual inside Omarchy",
   "kinds": ["overlay", "service"],
+  "keepLoaded": true,
   "entryPoints": { "overlay": "Overlay.qml", "service": "Service.qml" }
 }

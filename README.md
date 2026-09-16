@@ -74,7 +74,8 @@ See [INSTALL.md](INSTALL.md) for the short checklist and troubleshooting.
 Open it with `SUPER + ALT + M`, or from a terminal:
 
 ```bash
-omarchy-shell tmm.manual open
+omarchy-shell shell toggle tmm.manual
+omarchy-shell shell summon tmm.manual
 omarchy menu summon tmm.guides
 ```
 
@@ -93,10 +94,10 @@ The overlay accepts an optional JSON payload:
 
 ```bash
 # Open search directly
-omarchy-shell tmm.manual open '{"query":"git rebase"}'
+omarchy-shell shell summon tmm.manual '{"query":"git rebase"}'
 
 # Open an exact phase
-omarchy-shell tmm.manual open '{"slug":"git-from-zero","phase":2}'
+omarchy-shell shell summon tmm.manual '{"slug":"git-from-zero","phase":2}'
 ```
 
 ### CLI

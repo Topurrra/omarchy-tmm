@@ -1,5 +1,5 @@
 -- Missing Manual keybinds: copy into ~/.config/hypr/bindings.lua
 -- Requires the tmm CLI on PATH (see omarchy-tmm/bin/tmm).
 local o = require("default.hypr.helpers")
-o.bind("SUPER + ALT + M", "Missing Manual search", "omarchy-shell tmm.manual open")
+o.bind("SUPER + ALT + M", "Missing Manual search", "omarchy-shell shell toggle tmm.manual")
 o.bind("SUPER + SHIFT + M", "Missing Manual terminal search", "xdg-terminal-exec -- tmm search")
