@@ -3,7 +3,7 @@
 > Requires the Omarchy v4 plugin/menu APIs and the `qs.Commons` / `qs.Ui` QML
 > modules the shell ships. Not compatible with v3.
 
-1. Install the plugin: `omarchy plugin add <url> --enable`
+1. Install the plugin: `omarchy plugin add <url>`
 
    Installing by hand instead? Copy **all** the QML and JS files plus the logo —
    the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and
@@ -15,11 +15,17 @@
       Model.js Markdown.js logo.png ~/.config/omarchy/plugins/tmm.manual/
    ```
 
-2. CLI: `cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm`
-3. Menu fragment: `cp extensions/omarchy-menu.jsonc ~/.config/omarchy/extensions/omarchy-menu.jsonc`
-4. Refresh the menu: `omarchy menu refresh`
-5. Keybinds: append `bindings.lua.fragment` to `~/.config/hypr/bindings.lua`
-6. Rescan: `omarchy-shell shell rescanPlugins`
+2. Rescan so the shell sees it: `omarchy-shell shell rescanPlugins`
+3. **Enable it: `omarchy plugin enable tmm.manual`**
+
+   Omarchy installs plugins disabled on purpose — they are unsandboxed code and
+   it wants you to read them first. A disabled plugin does nothing at all when
+   summoned, which looks exactly like a broken install.
+
+4. CLI: `cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm`
+5. Menu fragment: `cp extensions/omarchy-menu.jsonc ~/.config/omarchy/extensions/omarchy-menu.jsonc`
+6. Refresh the menu: `omarchy menu refresh`
+7. Keybinds: append `bindings.lua.fragment` to `~/.config/hypr/bindings.lua`
 
 Then press `SUPER + ALT + M` and start typing.
 
@@ -31,7 +37,12 @@ Then press `SUPER + ALT + M` and start typing.
 ## Troubleshooting
 
 - Validate the CLI: `sh -n ~/.local/bin/tmm && tmm --help`
-- Validate the plugin: `omarchy plugin validate ~/.config/omarchy/plugins/tmm.manual/`
+- Nothing happens on the keybind or menu entry? Check it is enabled first:
+  `omarchy-shell shell listPlugins | python3 -m json.tool | grep -A4 tmm.manual`
+  then `omarchy plugin enable tmm.manual`. Test directly with
+  `omarchy-shell shell summon tmm.manual` — it prints `ok` or `unknown`.
+- Menu rows showing the words `search` / `shuffle` instead of icons means an
+  old `omarchy-menu.jsonc`; re-copy it and run `omarchy menu refresh`.
 - Check the API: `curl -fsSL "$TMM_BASE/search.json?q=git" | head -c 200`
   (default `TMM_BASE=https://themissingmanual.dev`)
 - Overlay opens but looks unstyled: the shell could not resolve `qs.Commons`;

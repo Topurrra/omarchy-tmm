@@ -57,6 +57,12 @@ omarchy plugin add https://github.com/Topurrra/omarchy-tmm --enable
 omarchy-shell shell rescanPlugins
 ```
 
+Plugins are unsandboxed code, so Omarchy installs them **disabled** unless you
+pass `--enable`, and waits for you to review them. If you leave the flag off —
+or install by hand, as in Option B — finish with `omarchy plugin enable
+tmm.manual`. A disabled plugin answers a summon by doing nothing at all, which
+looks exactly like a broken install.
+
 ### Option B: manual install
 
 Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings.
@@ -67,6 +73,7 @@ cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml Model.js Mark
    ~/.config/omarchy/plugins/tmm.manual/
 cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm
 omarchy-shell shell rescanPlugins
+omarchy plugin enable tmm.manual        # copied plugins start disabled
 ```
 
 ### Option C: menu + keybindings (recommended)
@@ -205,9 +212,32 @@ omarchy-shell shell rescanPlugins
 
 - **Empty results**: check the network, then broaden the query. The API returns a `suggestion`, shown as "Did you mean".
 - **Stale page**: delete `~/.cache/tmm/<slug>-<phase>.md` and reopen.
-- **Overlay does not appear**: validate the manifest, rescan plugins, and check that `shell.json` lists `tmm.manual` under `plugins`.
+- **Overlay does not appear.** Work through these in order:
+
+  ```bash
+  # 1. Is it discovered, and is it enabled? (enabled:false is the usual answer)
+  omarchy-shell shell listPlugins | python3 -m json.tool | grep -A4 tmm.manual
+
+  # 2. Enable it
+  omarchy plugin enable tmm.manual
+  # or, equivalently:
+  omarchy-shell shell setPluginEnabled tmm.manual true
+
+  # 3. Are all the files there? Overlay.qml needs its siblings
+  ls ~/.config/omarchy/plugins/tmm.manual/
+  # expect: manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml
+  #         Model.js Markdown.js logo.png
+
+  # 4. Reload the code and try it directly
+  omarchy-shell shell rescanPlugins
+  omarchy-shell shell summon tmm.manual
+  ```
+
+  `summon` answers `ok` on success; `unknown` means the shell has no such
+  plugin loaded, which sends you back to steps 1–3.
 - **Overlay appears unstyled**: you are on an Omarchy build without `qs.Commons` / `qs.Ui`; this plugin targets v4 Quattro.
 - **Copy does nothing**: install `wl-copy` (`wl-clipboard`).
+- **Menu rows show words like `search` instead of icons**: you have an old copy of `extensions/omarchy-menu.jsonc`. The menu draws `icon` literally, so it must be a Nerd Font glyph. Re-copy the fragment and run `omarchy menu refresh`.
 - **Broken image in the header**: `logo.png` did not get copied next to `Overlay.qml`.
 - **No `python3`**: the CLI prints raw JSON and unrendered markdown. That is the intended fallback.
 

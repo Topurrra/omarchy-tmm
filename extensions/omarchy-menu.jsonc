@@ -2,36 +2,15 @@
   // Omarchy menu fragment: copy into ~/.config/omarchy/extensions/omarchy-menu.jsonc
   // then run: omarchy menu refresh
   //
+  // "icon" is drawn literally by the menu (Menu.qml renders it as text), so
+  // these are Nerd Font glyphs, not icon names. A name like "search" would
+  // show up as the word "search".
+  //
   // Every entry summons the overlay rather than shelling out, so the menu and
   // the keybindings land you in the same place.
-  "tmm": {
-    "label": "Missing Manual",
-    "description": "Search and read The Missing Manual",
-    "icon": "book-open",
-    "type": "submenu"
-  },
-  "tmm.search": {
-    "label": "Search Guides",
-    "description": "Search 367 developer guides (Esc closes)",
-    "icon": "search",
-    "action": "omarchy-shell shell summon tmm.manual"
-  },
-  "tmm.catalog": {
-    "label": "Browse Catalog",
-    "description": "Every guide, grouped by category",
-    "icon": "list",
-    "action": "omarchy-shell shell summon tmm.manual '{\"catalog\":true}'"
-  },
-  "tmm.random": {
-    "label": "Random Guide",
-    "description": "Open a guide at random",
-    "icon": "shuffle",
-    "action": "omarchy-shell shell summon tmm.manual '{\"random\":true}'"
-  },
-  "tmm.toggle": {
-    "label": "Toggle Manual",
-    "description": "Show or hide the Missing Manual overlay",
-    "icon": "book",
-    "action": "omarchy-shell shell toggle tmm.manual"
-  }
+  "tmm": {"icon":"󰗚","label":"Missing Manual","title":"The Missing Manual"},
+  "tmm.search": {"icon":"󰍉","label":"Search Guides","action":"omarchy-shell shell summon tmm.manual"},
+  "tmm.catalog": {"icon":"󰉹","label":"Browse Catalog","action":"omarchy-shell shell summon tmm.manual '{\"catalog\":true}'"},
+  "tmm.random": {"icon":"󰒝","label":"Random Guide","action":"omarchy-shell shell summon tmm.manual '{\"random\":true}'"},
+  "tmm.toggle": {"icon":"󰔎","label":"Toggle Manual","action":"omarchy-shell shell toggle tmm.manual"}
 }
