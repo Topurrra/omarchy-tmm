@@ -1,0 +1,34 @@
+{
+  // Omarchy menu fragment: copy into ~/.config/omarchy/extensions/omarchy-menu.jsonc
+  // then run: omarchy menu refresh
+  "tmm": {
+    "label": "Missing Manual",
+    "description": "Search and read TheMissingManual guides",
+    "icon": "book-open",
+    "type": "submenu"
+  },
+  "tmm.guides": {
+    "label": "Search Guides",
+    "description": "Search TheMissingManual guides",
+    "icon": "search",
+    "action": "omarchy-shell tmm.manual open"
+  },
+  "tmm.random": {
+    "label": "Random Guide",
+    "description": "Open a random guide",
+    "icon": "shuffle",
+    "action": "tmm random"
+  },
+  "tmm.close": {
+    "label": "Close Manual",
+    "description": "Close the open manual pager",
+    "icon": "x",
+    "action": "omarchy-shell tmm.manual close"
+  },
+  "tmm.cheat": {
+    "label": "Cheat Sheet",
+    "description": "Show the cheat sheet",
+    "icon": "zap",
+    "action": "tmm cheat"
+  }
+}

@@ -1,0 +1,167 @@
+#!/bin/sh
+# tmm - TheMissingManual CLI client.
+# Env: TMM_BASE (default https://themissingmanual.dev), PAGER, XDG_CACHE_HOME.
+set -eu
+BASE="${TMM_BASE:-https://themissingmanual.dev}"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmm"
+command -v curl >/dev/null 2>&1 || { echo "tmm: curl is required but not installed" >&2; exit 1; }
+fetch() { curl -fsSL --retry 2 --max-time 30 "$1"; }
+usage() {
+cat <<'EOF'
+Usage: tmm <command> [args]
+  search [query]      Search guides (prints "slug/phase - title")
+  open <slug>[/phase] Fetch phase .md to pager (cached ~/.cache/tmm/)
+  read <slug> <phase> Same as open but print to stdout
+  close               Stop tmm open pager processes (client-side)
+  list                List all guides from /guides.json
+  random              Print one random guide
+  categories          List category slugs
+  cheat               Print cheat-sheet JSON
+  offline <slug>      Download /guides/<slug>/epub to cache
+Env: TMM_BASE (default https://themissingmanual.dev)
+EOF
+}
+split_slug_phase() {
+  case "$1" in
+    */*) printf '%s %s\n' "${1%%/*}" "${1#*/}" ;;
+    *) printf '%s %s\n' "$1" "${2:-}" ;;
+  esac
+}
+cmd_search() {
+  q="${1:-}"
+  # Real shape: {hits:[{guide_slug,phase_no,title,summary}], suggestion}
+  q_enc="$q"
+  if command -v python3 >/dev/null 2>&1 && [ -n "$q" ]; then
+    q_enc="$(printf '%s' "$q" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))')"
+  fi
+  data="$(fetch "$BASE/search.json?q=$q_enc")"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$data" | python3 -c '
+import json, sys
+raw = json.load(sys.stdin)
+items = raw.get("hits", raw) if isinstance(raw, dict) else raw
+if isinstance(items, dict):
+    items = items.get("results", items.get("items", []))
+for it in items:
+    slug = it.get("guide_slug", it.get("slug", "?"))
+    ph = it.get("phase_no", it.get("phase", it.get("no", "")))
+    left = slug + ("/" + str(ph) if ph != "" and ph is not None else "")
+    print("%s - %s" % (left, it.get("title", "")))
+if isinstance(raw, dict) and raw.get("suggestion"):
+    print("Did you mean: %s" % raw["suggestion"])'
+  elif command -v jq >/dev/null 2>&1; then
+    printf '%s' "$data" | jq -r '(.hits // .) | .[] | "\(.guide_slug // .slug)/\(.phase_no // .phase // "") - \(.title)"'
+  else
+    printf '%s\n' "$data"
+  fi
+}
+fetch_phase() {
+  if [ -z "$1" ] || [ -z "$2" ]; then
+    echo "tmm: usage: tmm open <slug>/<phase>" >&2; exit 1
+  fi
+  mkdir -p "$CACHE_DIR"
+  dest="$CACHE_DIR/$1-$2.md"
+  fetch "$BASE/guides/$1/$2.md" > "$dest.tmp"
+  mv "$dest.tmp" "$dest"
+  printf '%s\n' "$dest"
+}
+cmd_open() {
+  if [ $# -lt 1 ]; then echo "tmm: usage: tmm open <slug>[/phase]" >&2; exit 1; fi
+  # shellcheck disable=SC2046
+  set -- $(split_slug_phase "$1" "${2:-}")
+  path="$(fetch_phase "$1" "$2")"
+  # shellcheck disable=SC2086
+  exec ${PAGER:-less} "$path"
+}
+cmd_read() {
+  if [ $# -lt 1 ]; then echo "tmm: usage: tmm read <slug> <phase>" >&2; exit 1; fi
+  # shellcheck disable=SC2046
+  set -- $(split_slug_phase "$1" "${2:-}")
+  path="$(fetch_phase "$1" "$2")"
+  cat "$path"
+}
+cmd_close() {
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -f "tmm open" || echo "tmm: no open tmm pager found"
+  else
+    echo "tmm: pkill not found; run: pkill -f 'tmm open'"
+  fi
+}
+cmd_list() {
+  data="$(fetch "$BASE/guides.json")"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$data" | python3 -c '
+import json, sys
+raw = json.load(sys.stdin)
+guides = raw if isinstance(raw, list) else [g for c in raw.get("categories", []) for g in c.get("guides", [])] or raw.get("guides", [])
+for g in guides:
+    print("%s - %s" % (g.get("slug", "?"), g.get("title", "")))'
+  elif command -v jq >/dev/null 2>&1; then
+    printf '%s' "$data" | jq -r 'if type == "array" then .[] | "\(.slug) - \(.title)" else .categories[].guides[] | "\(.slug) - \(.title)" end'
+  else
+    printf '%s\n' "$data"
+  fi
+}
+cmd_random() {
+  data="$(fetch "$BASE/guides.json")"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$data" | python3 -c '
+import json, random, sys
+raw = json.load(sys.stdin)
+guides = raw if isinstance(raw, list) else [g for c in raw.get("categories", []) for g in c.get("guides", [])] or raw.get("guides", [])
+g = random.choice(guides)
+print("%s - %s" % (g.get("slug", "?"), g.get("title", "")))'
+  elif command -v jq >/dev/null 2>&1 && command -v shuf >/dev/null 2>&1; then
+    printf '%s' "$data" | jq -r 'if type == "array" then .[] | "\(.slug) - \(.title)" else .categories[].guides[] | "\(.slug) - \(.title)" end' | shuf -n 1
+  else
+    echo "tmm: random requires python3 (or jq+shuf)" >&2; exit 1
+  fi
+}
+cmd_categories() {
+  data="$(fetch "$BASE/guides.json")"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$data" | python3 -c '
+import json, sys
+raw = json.load(sys.stdin)
+if isinstance(raw, list):
+    print("\n".join(sorted({str(g.get("category", "")) for g in raw if g.get("category")})))
+else:
+    print("\n".join(sorted(c.get("slug", "") for c in raw.get("categories", []))))'
+  elif command -v jq >/dev/null 2>&1; then
+    printf '%s' "$data" | jq -r 'if type == "array" then [.[].category // empty] | unique[] else .categories[].slug end'
+  else
+    printf '%s\n' "$data"
+  fi
+}
+cmd_cheat() {
+  data="$(fetch "$BASE/cheat-sheet.json")"
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$data" | python3 -m json.tool
+  elif command -v jq >/dev/null 2>&1; then
+    printf '%s' "$data" | jq .
+  else
+    printf '%s\n' "$data"
+  fi
+}
+cmd_offline() {
+  if [ $# -lt 1 ]; then echo "tmm: usage: tmm offline <slug>" >&2; exit 1; fi
+  mkdir -p "$CACHE_DIR"
+  dest="$CACHE_DIR/$1.epub"
+  fetch "$BASE/guides/$1/epub" > "$dest.tmp"
+  mv "$dest.tmp" "$dest"
+  echo "$dest"
+}
+cmd="${1:-}"; if [ $# -gt 0 ]; then shift; fi
+case "$cmd" in
+  search) cmd_search "$@" ;;
+  open) cmd_open "$@" ;;
+  read) cmd_read "$@" ;;
+  close) cmd_close ;;
+  list) cmd_list ;;
+  random) cmd_random ;;
+  categories) cmd_categories ;;
+  cheat) cmd_cheat ;;
+  offline) cmd_offline "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) echo "tmm: unknown command: $cmd" >&2; usage >&2; exit 1 ;;
+esac
