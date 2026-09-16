@@ -1,34 +1,37 @@
 {
   // Omarchy menu fragment: copy into ~/.config/omarchy/extensions/omarchy-menu.jsonc
   // then run: omarchy menu refresh
+  //
+  // Every entry summons the overlay rather than shelling out, so the menu and
+  // the keybindings land you in the same place.
   "tmm": {
     "label": "Missing Manual",
-    "description": "Search and read TheMissingManual guides",
+    "description": "Search and read The Missing Manual",
     "icon": "book-open",
     "type": "submenu"
   },
-  "tmm.guides": {
+  "tmm.search": {
     "label": "Search Guides",
-    "description": "Search TheMissingManual guides (Esc closes)",
+    "description": "Search 367 developer guides (Esc closes)",
     "icon": "search",
     "action": "omarchy-shell shell summon tmm.manual"
   },
+  "tmm.catalog": {
+    "label": "Browse Catalog",
+    "description": "Every guide, grouped by category",
+    "icon": "list",
+    "action": "omarchy-shell shell summon tmm.manual '{\"catalog\":true}'"
+  },
   "tmm.random": {
     "label": "Random Guide",
-    "description": "Open a random guide",
+    "description": "Open a guide at random",
     "icon": "shuffle",
-    "action": "tmm random"
+    "action": "omarchy-shell shell summon tmm.manual '{\"random\":true}'"
   },
-  "tmm.close": {
+  "tmm.toggle": {
     "label": "Toggle Manual",
-    "description": "Toggle the Missing Manual overlay",
-    "icon": "x",
+    "description": "Show or hide the Missing Manual overlay",
+    "icon": "book",
     "action": "omarchy-shell shell toggle tmm.manual"
-  },
-  "tmm.cheat": {
-    "label": "Cheat Sheet",
-    "description": "Show the cheat sheet",
-    "icon": "zap",
-    "action": "tmm cheat"
   }
 }

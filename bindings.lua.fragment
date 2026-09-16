@@ -1,5 +1,6 @@
--- Missing Manual keybinds: copy into ~/.config/hypr/bindings.lua
--- Requires the tmm CLI on PATH (see omarchy-tmm/bin/tmm).
+-- Missing Manual keybinds: append to ~/.config/hypr/bindings.lua
+-- The overlay is keyboard-first: type to search, arrows to move, Enter to read.
 local o = require("default.hypr.helpers")
-o.bind("SUPER + ALT + M", "Missing Manual search", "omarchy-shell shell toggle tmm.manual")
-o.bind("SUPER + SHIFT + M", "Missing Manual terminal search", "xdg-terminal-exec -- tmm search")
+o.bind("SUPER + ALT + M", "Missing Manual", "omarchy-shell shell toggle tmm.manual")
+o.bind("SUPER + ALT + B", "Missing Manual catalog", "omarchy-shell shell summon tmm.manual '{\"catalog\":true}'")
+o.bind("SUPER + ALT + R", "Missing Manual random guide", "omarchy-shell shell summon tmm.manual '{\"random\":true}'")
