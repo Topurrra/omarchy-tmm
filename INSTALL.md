@@ -5,13 +5,14 @@
 
 1. Install the plugin: `omarchy plugin add <url> --enable`
 
-   Installing by hand instead? Copy **all** the QML and JS files — the overlay
-   loads `Reader.qml`, `ResultList.qml` and `Markdown.js` as siblings:
+   Installing by hand instead? Copy **all** the QML and JS files plus the logo —
+   the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and
+   `logo.png` as siblings:
 
    ```bash
    mkdir -p ~/.config/omarchy/plugins/tmm.manual
    cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml \
-      Model.js Markdown.js ~/.config/omarchy/plugins/tmm.manual/
+      Model.js Markdown.js logo.png ~/.config/omarchy/plugins/tmm.manual/
    ```
 
 2. CLI: `cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm`
@@ -36,7 +37,8 @@ Then press `SUPER + ALT + M` and start typing.
 - Overlay opens but looks unstyled: the shell could not resolve `qs.Commons`;
   confirm you are on v4 Quattro.
 - Missing files after a manual copy: the overlay needs `Reader.qml`,
-  `ResultList.qml` and `Markdown.js` alongside `Overlay.qml`.
+  `ResultList.qml`, `Markdown.js` and `logo.png` alongside `Overlay.qml`.
+  A broken image in the header means `logo.png` was left behind.
 - No `python3`/`jq`: raw JSON output is the expected fallback.
 - Caches: phase markdown in `~/.cache/tmm/`, recents in
   `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.

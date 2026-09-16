@@ -1,4 +1,5 @@
 <p align="center">
+  <img src="logo.png" alt="The Missing Manual" width="96" height="96">
   <h1 align="center">The Missing Manual for Omarchy</h1>
   <p align="center">Search, browse and read developer guides without leaving your desktop.</p>
   <p align="center">
@@ -58,11 +59,11 @@ omarchy-shell shell rescanPlugins
 
 ### Option B: manual install
 
-Copy every QML and JS file — the overlay loads `Reader.qml`, `ResultList.qml` and `Markdown.js` as siblings.
+Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings.
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/tmm.manual
-cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml Model.js Markdown.js \
+cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml Model.js Markdown.js logo.png \
    ~/.config/omarchy/plugins/tmm.manual/
 cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm
 omarchy-shell shell rescanPlugins
@@ -183,6 +184,7 @@ Reader.qml                     # markdown blocks drawn as themed QML
 ResultList.qml                 # keyboard-first list, shared by search and catalog
 Service.qml                    # headless API client, cache, recents, signals
 Markdown.js                    # markdown -> blocks + inline rich text
+logo.png                       # brand mark, shown in the header and on welcome
 Model.js                       # URL builders, catalog parsing, phase nav
 bin/tmm                        # terminal client with the same renderer
 extensions/omarchy-menu.jsonc  # menu fragment
@@ -206,6 +208,7 @@ omarchy-shell shell rescanPlugins
 - **Overlay does not appear**: validate the manifest, rescan plugins, and check that `shell.json` lists `tmm.manual` under `plugins`.
 - **Overlay appears unstyled**: you are on an Omarchy build without `qs.Commons` / `qs.Ui`; this plugin targets v4 Quattro.
 - **Copy does nothing**: install `wl-copy` (`wl-clipboard`).
+- **Broken image in the header**: `logo.png` did not get copied next to `Overlay.qml`.
 - **No `python3`**: the CLI prints raw JSON and unrendered markdown. That is the intended fallback.
 
 ## Contributing

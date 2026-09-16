@@ -340,8 +340,13 @@ Item {
 
     // ------------------------------------------------------------ chrome
 
-    readonly property string modeIcon: mode === "reader" ? ""
-        : mode === "catalog" ? "" : ""
+    // The welcome screen is the one state that is about identity rather than
+    // about what you are doing, so it gets the real logo.
+    readonly property bool welcomeState: {
+        var s = svc();
+        return mode === "search" && !errorMsg && !query
+            && !(searchDebounce.running || (s && s.searching));
+    }
 
     readonly property string headline: {
         if (mode === "reader") return guideTitle || currentSlug;
@@ -440,15 +445,18 @@ Item {
                     anchors.right: parent.right
                     height: root.headerHeight
 
-                    Text {
+                    Image {
                         id: icon
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
-                        textFormat: Text.PlainText
-                        text: root.modeIcon
-                        color: root.mutedColor
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.icon
+                        source: Qt.resolvedUrl("logo.png")
+                        width: Style.space(20)
+                        height: width
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                        smooth: true
+                        mipmap: true
+                        fillMode: Image.PreserveAspectFit
                     }
 
                     Text {
@@ -579,8 +587,22 @@ Item {
                         spacing: Style.space(10)
                         visible: !resultList.visible && !catalogList.visible && !reader.visible
 
+                        Image {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            visible: root.welcomeState
+                            source: Qt.resolvedUrl("logo.png")
+                            width: Style.space(72)
+                            height: width
+                            sourceSize.width: 256
+                            sourceSize.height: 256
+                            smooth: true
+                            mipmap: true
+                            fillMode: Image.PreserveAspectFit
+                        }
+
                         Text {
                             width: parent.width
+                            visible: !root.welcomeState
                             horizontalAlignment: Text.AlignHCenter
                             textFormat: Text.PlainText
                             text: root.emptyGlyph
