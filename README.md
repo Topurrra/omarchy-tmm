@@ -53,7 +53,7 @@ Switch themes and the reader repaints with the desktop.
 ### Option A: plugin manager
 
 ```bash
-omarchy plugin add https://github.com/YOU/omarchy-tmm.git --enable
+omarchy plugin add https://github.com/Topurrra/omarchy-tmm --enable
 omarchy-shell shell rescanPlugins
 ```
 
