@@ -5,7 +5,7 @@
   <p align="center">
     <a href="https://themissingmanual.dev"><img src="https://img.shields.io/badge/docs-themissingmanual.dev-blue?style=flat-square" alt="docs"></a>
     <img src="https://img.shields.io/badge/omarchy-v4%20Quattro-purple?style=flat-square" alt="omarchy v4">
-    <img src="https://img.shields.io/badge/version-0.2.0-green?style=flat-square" alt="version">
+    <img src="https://img.shields.io/badge/version-0.4.0-green?style=flat-square" alt="version">
     <img src="https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square" alt="license">
   </p>
 </p>
@@ -30,10 +30,12 @@ Switch themes and the reader repaints with the desktop.
 
 - **Live search** as you type, with typo tolerance and a "did you mean" you can accept with `Shift+Enter`
 - **A real reader, not a text dump** — headings, lists, block quotes, tables and rules are drawn as themed QML; code lands in bordered cards you click to copy
+- **Quizzes you can actually answer** — the `Check your understanding` block at the end of a phase is a real quiz: a choice locks on first answer, a wrong one gets the diagnosis written for that specific distractor, and you can retry just the ones you missed
+- **Diagrams, drawn in your theme** — the site bakes every mermaid diagram to SVG with placeholder colours its CSS remaps; the plugin makes the same substitution against your Omarchy palette, so a flowchart matches the desktop around it
 - **Keyboard-first throughout** — arrows, `Enter`, `Tab`, `n`/`p`, `g`/`G`; the mouse is optional everywhere
 - **Recents** on the empty search screen, shared between the overlay and the CLI, so "where was I" is one keystroke
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
-- **Catalog browser** with instant local filtering (the catalog is fetched once per session)
+- **Catalog browser by category** — `Tab` opens the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
 - **Offline fallback** — a phase you have read before still opens with no network, and says so
 - **A bar button** — a book glyph in the Omarchy bar that toggles the overlay, so there is always something to click
 - **A CLI that matches** — `tmm read` renders the same markdown with ANSI styling
@@ -160,16 +162,34 @@ Typing always goes to the filter — there is no field to click into first.
 | *click a code block* | Copy that snippet |
 | `Esc` / `Backspace` | Back to your results |
 | `/` | Start a new search |
-| `q` | Close |
+| `q` | Answer the quiz — or close, on a phase that has none |
+| `Shift+Q` | Close |
+
+**Quiz** (`q` in the reader; `Esc` leaves the quiz, not the reader)
+
+| Key | Action |
+|-----|--------|
+| `a`–`d` / `1`–`4` | Answer the current question, then move to the next unanswered |
+| `↑` `↓` / `j` `k` | Move between questions |
+| `r` | Start over |
+| `m` | Retry only the ones you missed |
+| `Esc` | Back to reading |
+
+Everything else keeps working mid-quiz — `n`/`p`, `y`, `o`, `Space` and `G` all still do
+what they do in the reader.
 
 **Catalog**
+
+Two levels: the category list, then the guides inside one.
 
 | Key | Action |
 |-----|--------|
 | *any character* | Filter locally (no network) |
-| `↑` `↓`, `Enter` | Move, open |
+| `↑` `↓` | Move |
+| `Enter` | Open the category, then open the guide |
+| `Backspace` (empty filter) | Back up to the categories |
 | `Tab` | Back to search |
-| `Esc` | Clear the filter, then back, then close |
+| `Esc` | Clear the filter, then back up a level, then close |
 
 ### CLI
 
@@ -199,6 +219,7 @@ TMM_BASE=http://localhost:5173 tmm search "networks"
 | catalog | `GET /llms.txt` parsed locally (open) | `Service.qml`, `Model.js` |
 | open guide | `GET /guides/:slug.md` (open) | `Service.qml` |
 | read phase | `GET /guides/:slug/:phase.md` (open) | `Service.qml`, `bin/tmm` |
+| diagrams | `GET /guides/:slug/:phase` HTML, figures extracted locally (open) | `Service.qml`, `bin/tmm-diagrams` |
 | offline book | `GET /guides/:slug/epub` (open) | `tmm offline` |
 
 `/guides.json`, `/cheat-sheet.json` and `/api/*` need a site key or a self-hosted API, so the plugin avoids them on the public host.
@@ -216,12 +237,14 @@ Markdown.js                    # markdown -> blocks + inline rich text
 logo.png                       # brand mark, shown in the header and on welcome
 Model.js                       # URL builders, catalog parsing, phase nav
 bin/tmm                        # terminal client with the same renderer
+bin/tmm-diagrams               # pulls the baked mermaid SVGs out of a phase and re-themes them
 bin/tmm-menu                   # merges/removes our entries in the shared menu file
 extensions/omarchy-menu.jsonc  # menu fragment
 bindings.lua.fragment          # Hyprland keybind fragment
 ```
 
-Phase markdown is cached in `~/.cache/tmm/` as `<slug>-<phase>.md`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` and are shared by the overlay and the CLI.
+Phase markdown is cached in `~/.cache/tmm/` as `<slug>-<phase>.md`, themed diagram SVGs
+in `~/.cache/tmm/diagrams/`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` and are shared by the overlay and the CLI.
 
 ## Troubleshooting
 

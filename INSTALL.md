@@ -5,16 +5,23 @@
 
 1. Install the plugin: `omarchy plugin add <url> --enable`
 
-   Installing by hand instead? Copy **all** the QML and JS files plus the logo —
-   the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and
-   `logo.png` as siblings:
+   Installing by hand instead? Copy **all** the QML and JS files, the logo, and
+   the `bin/` directory — the overlay loads `Reader.qml`, `ResultList.qml`,
+   `Markdown.js` and `logo.png` as siblings, and the service runs
+   `bin/tmm-diagrams` from the plugin folder:
 
    ```bash
    mkdir -p ~/.config/omarchy/plugins/tmm.manual
    cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml \
       BarWidget.qml Model.js Markdown.js logo.png \
       ~/.config/omarchy/plugins/tmm.manual/
+   cp -r bin ~/.config/omarchy/plugins/tmm.manual/
+   chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
    ```
+
+   Leave `bin/` out and the plugin still works, but every diagram stays a
+   `Diagram · mermaid` card and nothing says why — a missing helper is not an
+   error the reader can show you.
 
 2. Rescan so the shell sees it: `omarchy-shell shell rescanPlugins`
 3. **If you copied by hand, or left `--enable` off: `omarchy plugin enable tmm.manual`**
@@ -38,10 +45,15 @@ Then click the book glyph in the bar, or press `SUPER + ALT + M`, and start
 typing. If the bar button does not appear on its own:
 `omarchy bar put tmm.manual --section right`.
 
+## Requirements
+
+- `python3` — runs `bin/tmm-diagrams` (every rendered diagram) and `bin/tmm-menu`
+  (the menu entries), and drives the CLI's pretty output. Omarchy ships it.
+- `curl` — every request the service makes.
+
 ## Optional
 
 - `wl-clipboard` — enables click-to-copy on code blocks and `y` in the reader.
-- `python3` — pretty CLI output and terminal markdown rendering.
 
 ## Troubleshooting
 
@@ -57,6 +69,18 @@ typing. If the bar button does not appear on its own:
   `journalctl -t omarchy-shell -n 100 --no-pager`, or `-f` to watch live while
   you summon. After editing plugin files, `omarchy-restart-shell` is a cleaner
   reset than `rescanPlugins`.
+- Diagrams all showing as `Diagram · mermaid` cards? The helper is missing or
+  cannot run. It lives beside the QML, not on your PATH:
+
+  ```bash
+  ls -l ~/.config/omarchy/plugins/tmm.manual/bin/tmm-diagrams   # exists, +x?
+  command -v python3
+  curl -fsSL https://themissingmanual.dev/guides/deadlocks-explained/1 \
+    | ~/.config/omarchy/plugins/tmm.manual/bin/tmm-diagrams /tmp/d test
+  ```
+
+  That last line prints one `path<TAB>width<TAB>height` per diagram. No output
+  means the page had no baked figures; an error means python3 is the problem.
 - Check the API: `curl -fsSL "$TMM_BASE/search.json?q=git" | head -c 200`
   (default `TMM_BASE=https://themissingmanual.dev`)
 - Overlay opens but looks unstyled: the shell could not resolve `qs.Commons`;
@@ -65,7 +89,7 @@ typing. If the bar button does not appear on its own:
   `ResultList.qml`, `Markdown.js` and `logo.png` alongside `Overlay.qml`.
   A broken image in the header means `logo.png` was left behind.
 - No `python3`/`jq`: raw JSON output is the expected fallback.
-- Caches: phase markdown in `~/.cache/tmm/`, recents in
+- Caches: phase markdown and diagram SVGs in `~/.cache/tmm/`, recents in
   `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.
 - Menu entry still there after deleting the plugin? It lives in Omarchy's
   shared menu file, not in the plugin folder: `tmm-menu remove && omarchy menu
