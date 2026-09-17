@@ -24,6 +24,7 @@ Item {
     property bool searching: false
     property bool loadingPhase: false
     property bool loadingCatalog: false
+    property bool asking: false
 
     // Cached for the session: /llms.txt is ~400 entries and never changes
     // mid-session, so the catalog opens instantly after the first fetch.
@@ -43,6 +44,9 @@ Item {
     signal phaseDone(string slug, int phase, string markdown, bool fromCache, var meta)
     // [{ path, w, h }] in document order, matching the Nth ```mermaid fence.
     signal diagramsDone(string slug, int phase, var diagrams)
+    // The /ask.json payload, verbatim. The overlay reads its shape rather than
+    // this file flattening it into something lossy.
+    signal askDone(string query, var data, bool fromCache)
     signal error(string msg)
 
     // Pending request context (each proc is single-flight).
@@ -52,6 +56,17 @@ Item {
     property int _phaseNo: 0
 
     function _url(path) { return apiBase + path; }
+
+    // Percent-encode for a URL that will be interpolated into a single-quoted
+    // shell word. encodeURIComponent leaves ! ' ( ) * alone, and an apostrophe
+    // -- "what's a deadlock" -- would end the quoting. Escaping them here means
+    // the command never contains a quote character to escape.
+    function _urlArg(value) {
+        return encodeURIComponent(String(value === undefined || value === null ? "" : value))
+            .replace(/[!'()*]/g, function (c) {
+                return "%" + c.charCodeAt(0).toString(16).toUpperCase();
+            });
+    }
 
     // Restart a proc with a new command (kills any in-flight request).
     function _run(proc, cmd) {
@@ -102,12 +117,15 @@ Item {
     function _phaseBase(slug, phase) { return cacheDir + "/" + slug + "-" + phase; }
 
     function getPhase(slug, phase) {
-        if (!slug || phase < 1) return;
+        // The slug reaches a shell both as a URL and as a cache filename, so it
+        // is checked once here rather than escaped in three places. Catalog
+        // slugs are URL-safe by construction; that is the server's invariant.
+        if (!slug || phase < 1 || !/^[A-Za-z0-9._-]+$/.test(slug)) return;
         _phaseSlug = slug;
         _phaseNo = phase;
         loadingPhase = true;
         _phaseSettled = false;
-        var url = _url("/guides/" + encodeURIComponent(slug) + "/" + phase + ".md");
+        var url = _url("/guides/" + _urlArg(slug) + "/" + phase + ".md");
         var base = _phaseBase(slug, phase);
         // Drop the old sidecar first: curl leaves it untouched on a failed
         // fetch, and stale bounds are worse than none.
@@ -190,7 +208,7 @@ Item {
         }
         var stem = slug + "-" + phase;
         var html = cacheDir + "/" + stem + ".html";
-        var url = _url("/guides/" + encodeURIComponent(slug) + "/" + phase);
+        var url = _url("/guides/" + _urlArg(slug) + "/" + phase);
         // Switching themes must not cost a round trip, so the page is teed on
         // the first fetch and read back for every re-theme after it. The -s
         // test matters: a failed first fetch leaves an empty file behind, and
@@ -237,6 +255,91 @@ Item {
         // a card naming the diagram, which is what it shows while loading too.
         onExited: code => {
             if (code !== 0) root.diagramsDone(root._diagSlug, root._diagPhase, []);
+        }
+    }
+
+    // ---------------------------------------------------------------- ask
+    //
+    // GET /ask.json?q=... is public: no key, no cookie, which is the only thing
+    // curl can do. The site's own rule (aiFallback.js) is that AI is never
+    // called from typeahead -- the generated answer is an explicit action, and
+    // the zero-hit path uses ?mode=search, which is free. That rule is about a
+    // budget this plugin shares, so it is kept here rather than reinvented.
+    //
+    // Answers are cached on disk as well: asking the same thing twice should
+    // not spend the budget twice, and a re-read is instant.
+
+    property string askDir: cacheDir + "/ask"
+    property string _askQ: ""
+    property string _askFile: ""
+
+    // Names a cache file. Not a checksum -- it only has to not collide, and
+    // QML has no crypto.
+    function _askKey(query, mode) {
+        var flat = String(mode || "") + "\u0000" + String(query || "");
+        var h = 5381;
+        for (var i = 0; i < flat.length; i++) h = ((h * 33) ^ flat.charCodeAt(i)) >>> 0;
+        return h.toString(36);
+    }
+
+    function askCacheKey(query, mode) {
+        return _askKey(_normaliseAsk(query), mode);
+    }
+
+    function _normaliseAsk(query) {
+        return String(query || "").replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "").toLowerCase();
+    }
+
+    // mode: "" for a generated answer (paid), "search" for retrieval (free).
+    function ask(query, mode) {
+        var q = String(query || "").replace(/^\s+|\s+$/g, "");
+        if (!q) return;
+        // The endpoint rejects anything longer; say so before spending a call.
+        if (q.length > 300) { root.askDone(q, { "enabled": true, "error": "too_long" }, false); return; }
+
+        _askQ = q;
+        _askFile = askDir + "/" + _askKey(_normaliseAsk(q), mode) + ".json";
+        asking = true;
+        var url = _url("/ask.json?q=" + _urlArg(q) + (mode === "search" ? "&mode=search" : ""));
+        // Read the cached answer if we have one, otherwise fetch and keep it.
+        // The leading flag says which happened, so the panel can be honest
+        // about showing you something it did not just ask for.
+        _run(askProc, ["sh", "-c",
+            "if [ -s '" + _askFile + "' ]; then printf 'c\\036'; cat '" + _askFile + "'; else "
+            + "printf 'n\\036'; mkdir -p '" + askDir + "' && curl -fsSL --max-time 25 '" + url + "'"
+            + " | tee '" + _askFile + "'; fi"]);
+    }
+
+    function clearAskCache() { Quickshell.execDetached(["sh", "-c", "rm -rf '" + askDir + "'"]); }
+
+    Process {
+        id: askProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.asking = false;
+                var raw = String(text || "");
+                var at = raw.indexOf(root._rs);
+                var cached = at >= 0 && raw.substring(0, at) === "c";
+                var body = at >= 0 ? raw.substring(at + 1) : raw;
+                if (body.length === 0) {
+                    root.askDone(root._askQ, { "enabled": true, "error": "network" }, false);
+                    return;
+                }
+                try {
+                    root.askDone(root._askQ, JSON.parse(body), cached);
+                } catch (e) {
+                    // A half-written cache file would poison every later ask.
+                    Quickshell.execDetached(["rm", "-f", root._askFile]);
+                    root.askDone(root._askQ, { "enabled": true, "error": "network" }, false);
+                }
+            }
+        }
+        stderr: StdioCollector {}
+        onExited: code => {
+            if (code !== 0 && root.asking) {
+                root.asking = false;
+                root.askDone(root._askQ, { "enabled": true, "error": "network" }, false);
+            }
         }
     }
 

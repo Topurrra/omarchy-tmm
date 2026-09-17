@@ -89,7 +89,7 @@ typing. If the bar button does not appear on its own:
   `ResultList.qml`, `Markdown.js` and `logo.png` alongside `Overlay.qml`.
   A broken image in the header means `logo.png` was left behind.
 - No `python3`/`jq`: raw JSON output is the expected fallback.
-- Caches: phase markdown and diagram SVGs in `~/.cache/tmm/`, recents in
+- Caches: phase markdown, diagram SVGs and AI answers in `~/.cache/tmm/`, recents in
   `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.
 - Menu entry still there after deleting the plugin? It lives in Omarchy's
   shared menu file, not in the plugin folder: `tmm-menu remove && omarchy menu

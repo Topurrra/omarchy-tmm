@@ -33,6 +33,7 @@ Switch themes and the reader repaints with the desktop.
 - **Quizzes you can actually answer** — the `Check your understanding` block at the end of a phase is a real quiz: a choice locks on first answer, a wrong one gets the diagnosis written for that specific distractor, and you can retry just the ones you missed
 - **Diagrams, drawn in your theme** — the site bakes every mermaid diagram to SVG with placeholder colours its CSS remaps; the plugin makes the same substitution against your Omarchy palette, so a flowchart matches the desktop around it
 - **Keyboard-first throughout** — arrows, `Enter`, `Tab`, `n`/`p`, `g`/`G`; the mouse is optional everywhere
+- **Ask the guides** — press `?` and get an answer written from the manual itself, with the phases it came from listed underneath; press `1`–`9` to open one. Answers are cached locally, so asking the same thing twice is free and instant
 - **Recents** on the empty search screen, shared between the overlay and the CLI, so "where was I" is one keystroke
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
 - **Catalog browser by category** — `Tab` opens the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
@@ -144,10 +145,26 @@ Typing always goes to the filter — there is no field to click into first.
 | `PgUp` `PgDn` `Home` `End` | Jump |
 | `Enter` | Open the highlighted hit |
 | `Shift+Enter` | Accept the "did you mean" suggestion |
+| `?` | Ask the guides about what you typed |
 | `Tab` | Browse the catalog |
 | `Ctrl+R` | Open a random guide |
 | `Backspace` / `Ctrl+U` | Delete a character / clear |
 | `Esc` | Clear the query, then close |
+
+**Ask** (`?` from search)
+
+| Key | Action |
+|-----|--------|
+| `1`–`9` | Open the Nth source in the reader |
+| `Enter` | Open the first source |
+| `↑` `↓` / `j` `k` / `Space` | Scroll |
+| `y` | Copy the answer |
+| `o` | Open the search page in the browser |
+| `Esc` / `Backspace` | Back to your results |
+
+Answers come from the site's own `/ask.json`, which is public. Nothing about you
+is sent — only the question. If the host has AI answers switched off, or the
+month's budget is spent, the panel says so and search carries on working.
 
 **Reader**
 
@@ -220,6 +237,7 @@ TMM_BASE=http://localhost:5173 tmm search "networks"
 | open guide | `GET /guides/:slug.md` (open) | `Service.qml` |
 | read phase | `GET /guides/:slug/:phase.md` (open) | `Service.qml`, `bin/tmm` |
 | diagrams | `GET /guides/:slug/:phase` HTML, figures extracted locally (open) | `Service.qml`, `bin/tmm-diagrams` |
+| ask | `GET /ask.json?q=` (open) | `Service.qml` |
 | offline book | `GET /guides/:slug/epub` (open) | `tmm offline` |
 
 `/guides.json`, `/cheat-sheet.json` and `/api/*` need a site key or a self-hosted API, so the plugin avoids them on the public host.
@@ -244,7 +262,7 @@ bindings.lua.fragment          # Hyprland keybind fragment
 ```
 
 Phase markdown is cached in `~/.cache/tmm/` as `<slug>-<phase>.md`, themed diagram SVGs
-in `~/.cache/tmm/diagrams/`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` and are shared by the overlay and the CLI.
+in `~/.cache/tmm/diagrams/` and answers in `~/.cache/tmm/ask/`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` and are shared by the overlay and the CLI.
 
 ## Troubleshooting
 

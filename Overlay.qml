@@ -27,7 +27,7 @@ Item {
     Service { id: tmmService }
 
     property bool opened: false
-    property string mode: "search"   // search | reader | catalog
+    property string mode: "search"   // search | reader | catalog | ask
     property string query: ""
     property string catalogFilter: ""
     // Catalog is two levels: the category list, then the guides inside one.
@@ -49,6 +49,23 @@ Item {
     property int phaseCount: 0
     property int nextPhaseNo: 0
     property string returnMode: "search"
+
+    // ------------------------------------------------------------------ ask
+    //
+    // The site's rule (aiFallback.js) is that AI is never called from
+    // typeahead: the written answer is an explicit action, and the zero-hit
+    // path uses the free retrieval mode after a pause. Both are its budget,
+    // so both rules hold here.
+    property string askQuery: ""
+    property string askBody: ""
+    property string askNotice: ""
+    property bool askCached: false
+    property var askSources: []
+    // Which call is in flight: "" for the written answer, "search" for the
+    // free retrieval used as a zero-hit fallback.
+    property string _askMode: ""
+    // Set once the host says the feature is off, so we stop offering it.
+    property bool askDisabled: false
 
     // ------------------------------------------------------------- theming
     //
@@ -189,6 +206,122 @@ Item {
         root.showingRecents = resultsModel.count > 0;
         resultList.cursorIndex = 0;
         resultList.cursorActive = resultsModel.count > 0;
+    }
+
+    // ------------------------------------------------------------ ask flow
+
+    function canAsk() {
+        var s = svc();
+        return !root.askDisabled && s && typeof s.ask === "function";
+    }
+
+    function enterAsk(question) {
+        var q = String(question || "").replace(/^\s+|\s+$/g, "");
+        if (!q || !canAsk()) return;
+        if (root.mode !== "ask") root.returnMode = root.mode;
+        root.mode = "ask";
+        root.errorMsg = "";
+        root.askQuery = q;
+        root.askBody = "";
+        root.askNotice = "";
+        root.askCached = false;
+        root.askSources = [];
+        root._askMode = "";
+        aiFallback.stop();
+        svc().ask(q, "");
+    }
+
+    function leaveAsk() {
+        root.mode = root.returnMode === "ask" ? "search" : root.returnMode;
+        if (root.mode === "search" && !root.query) root.showRecents();
+    }
+
+    // Sources come back as {slug, phase, url, title}; phase is a string or null.
+    function _askSource(src) {
+        if (!src || !src.slug) return null;
+        var phase = Number(src.phase);
+        return {
+            "title": Markdown.plain(src.title || src.slug),
+            "slug": String(src.slug),
+            "phase": phase > 0 ? phase : 1,
+            "url": String(src.url || "")
+        };
+    }
+
+    function openAskSource(index) {
+        var list = root.askSources;
+        if (index < 0 || index >= list.length) return;
+        root.returnMode = "search";
+        root.openPhase(list[index].slug, list[index].phase, list[index].title);
+    }
+
+    // The answer, and its sources, as one markdown document: the reader already
+    // draws markdown, and the answer arrives as markdown with its links
+    // rewritten, so there is nothing here worth a second renderer.
+    function _askDocument(answer, sources) {
+        var out = String(answer || "");
+        if (sources.length > 0) {
+            out += "\n\n---\n\n### Sources\n\n";
+            for (var i = 0; i < sources.length; i++) {
+                out += (i + 1) + ". " + sources[i].title
+                    + "  —  phase " + sources[i].phase + "\n";
+            }
+        }
+        return out;
+    }
+
+    // Every shape /ask.json can return gets its own line. A spent budget is
+    // not a failure, and a disabled feature is not an error to show someone.
+    function applyAsk(query, data, fromCache) {
+        var d = data || ({});
+        if (d.enabled === false) {
+            root.askDisabled = true;
+            root.askNotice = "AI answers are not enabled on this host.";
+            root.askBody = "";
+            root.askSources = [];
+            return;
+        }
+        root.askCached = fromCache === true || d.cached === true;
+        if (d.capReached) {
+            root.askNotice = "AI answers have hit this month’s limit — search still works.";
+            root.askBody = "";
+            root.askSources = [];
+            return;
+        }
+        if (d.error) {
+            root.askNotice = d.error === "too_long"
+                ? "That question is too long — 300 characters is the limit."
+                : "The answer service is unavailable right now — try search instead.";
+            root.askBody = "";
+            root.askSources = [];
+            return;
+        }
+
+        var sources = [];
+        var raw = Array.isArray(d.sources) ? d.sources : [];
+        for (var i = 0; i < raw.length; i++) {
+            var one = root._askSource(raw[i]);
+            if (one) sources.push(one);
+        }
+
+        var body = String(d.answer || "");
+        if (!body && Array.isArray(d.results)) {
+            // Retrieval, not a written answer: show the passages themselves.
+            for (var r = 0; r < d.results.length; r++) {
+                var hit = d.results[r];
+                body += "**" + Markdown.plain(hit.title || hit.slug) + "**\n\n"
+                    + String(hit.text || "") + "\n\n";
+            }
+        }
+        if (!body && sources.length === 0) {
+            root.askNotice = "Nothing came back for that. Try wording it differently.";
+            root.askBody = "";
+            root.askSources = [];
+            return;
+        }
+        root.askNotice = "";
+        root.askSources = sources;
+        root.askBody = root._askDocument(body, sources);
     }
 
     // --------------------------------------------------------- reader flow
@@ -359,6 +492,20 @@ Item {
         onTriggered: root.statusMsg = ""
     }
 
+    // The zero-hit fallback, mirroring the site's: never per keystroke, only
+    // after a pause, only when keyword search already came back empty, and
+    // always on the free retrieval path.
+    Timer {
+        id: aiFallback
+        interval: 550
+        onTriggered: {
+            var q = root.query.replace(/^\s+|\s+$/g, "");
+            if (q.length < 3 || root.mode !== "search" || !root.canAsk()) return;
+            root._askMode = "search";
+            svc().ask(q, "search");
+        }
+    }
+
     Timer {
         id: searchDebounce
         interval: 240
@@ -445,6 +592,18 @@ Item {
             root.suggestion = (result && result.suggestion) || "";
             resultList.cursorIndex = 0;
             resultList.cursorActive = resultsModel.count > 0;
+            if (resultsModel.count === 0) aiFallback.restart();
+            else aiFallback.stop();
+        }
+
+        function onAskDone(query, data, fromCache) {
+            if (root._askMode === "search") {
+                root._askMode = "";
+                root.addAskSuggestions(query, data);
+                return;
+            }
+            if (root.mode !== "ask" || query !== root.askQuery) return;
+            root.applyAsk(query, data, fromCache);
         }
 
         function onPhaseDone(slug, phase, markdown, fromCache, meta) {
@@ -483,6 +642,31 @@ Item {
         function onError(msg) { root.errorMsg = msg; }
     }
 
+    // Retrieval rows appended under an empty keyword search. Dropped outright
+    // if the query moved on while the call was in flight.
+    function addAskSuggestions(query, data) {
+        if (root.mode !== "search") return;
+        if (query !== root.query.replace(/^\s+|\s+$/g, "")) return;
+        if (resultsModel.count > 0) return;
+        var d = data || ({});
+        if (d.enabled === false) { root.askDisabled = true; return; }
+        var rows = Array.isArray(d.results) ? d.results : [];
+        for (var i = 0; i < rows.length && i < 3; i++) {
+            var hit = rows[i];
+            if (!hit || !hit.slug) continue;
+            var phase = Number(hit.phase);
+            resultsModel.append({
+                "title": Markdown.plain(hit.title || hit.slug),
+                "summary": Markdown.plain(hit.text || ""),
+                "badge": "related",
+                "guide_slug": String(hit.slug),
+                "phase_no": phase > 0 ? phase : 1
+            });
+        }
+        resultList.cursorIndex = 0;
+        resultList.cursorActive = resultsModel.count > 0;
+    }
+
     function stripFrontmatter(md) {
         return String(md || "").replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
     }
@@ -498,6 +682,7 @@ Item {
     }
 
     readonly property string headline: {
+        if (mode === "ask") return askQuery;
         if (mode === "reader") return guideTitle || currentSlug;
         if (mode === "catalog") {
             if (catalogFilter) return catalogFilter;
@@ -513,6 +698,13 @@ Item {
 
     readonly property string headerStatus: {
         var s = svc();
+        if (mode === "ask") {
+            if (s && s.asking) return "thinking…";
+            if (root.askNotice) return "";
+            var n = root.askSources.length;
+            return (root.askCached ? "cached" : "answer")
+                + (n ? "  ·  " + n + (n === 1 ? " source" : " sources") : "");
+        }
         if (mode === "reader") {
             if (s && s.loadingPhase) return "loading…";
             var mins = phaseBody ? Markdown.readingMinutes(phaseBody) : 0;
@@ -533,6 +725,9 @@ Item {
     }
 
     readonly property string keyHints: {
+        if (mode === "ask")
+            return (root.askSources.length ? "1-9 open a source  ·  " : "")
+                + "↑↓ scroll  ·  o browser  ·  ⎋ back";
         if (mode === "reader" && reader.quizActive)
             return "a-d answer  ·  ↑↓ question  ·  r start over  ·  m retry missed  ·  ⎋ done";
         if (mode === "reader")
@@ -711,7 +906,6 @@ Item {
                         visible: root.mode === "search" && resultsModel.count > 0
                         model: resultsModel
                         foreground: root.foreground
-                        accentColor: Color.accent
                         mutedColor: root.mutedColor
                         selectedBackground: root.selectedBackground
                         selectedText: root.selectedText
@@ -744,6 +938,19 @@ Item {
                         onLinkActivated: url => Quickshell.execDetached(["xdg-open", url])
                     }
 
+                    // The answer is markdown, and the reader draws markdown --
+                    // there is nothing here that wants a second renderer.
+                    Reader {
+                        id: askReader
+                        anchors.fill: parent
+                        visible: root.mode === "ask" && root.askBody.length > 0
+                        markdown: root.askBody
+                        foreground: root.foreground
+                        mutedColor: root.mutedColor
+                        fontFamily: root.fontFamily
+                        onLinkActivated: url => Quickshell.execDetached(["xdg-open", url])
+                    }
+
                     // Empty and loading states. A blank panel is the least
                     // helpful thing a manual can show, so every one of these
                     // says what to do next.
@@ -751,7 +958,8 @@ Item {
                         anchors.centerIn: parent
                         width: parent.width * 0.8
                         spacing: Style.space(10)
-                        visible: !resultList.visible && !catalogList.visible && !reader.visible
+                        visible: !resultList.visible && !catalogList.visible
+                            && !reader.visible && !askReader.visible
 
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -816,10 +1024,11 @@ Item {
                     color: root.dividerColor
 
                     Rectangle {
-                        width: parent.width * (root.mode === "reader" ? reader.progress : 0)
+                        width: parent.width * (root.mode === "reader" ? reader.progress
+                            : root.mode === "ask" ? askReader.progress : 0)
                         height: parent.height
                         color: Color.accent
-                        visible: root.mode === "reader"
+                        visible: root.mode === "reader" || root.mode === "ask"
                     }
                 }
 
@@ -854,6 +1063,7 @@ Item {
         if (root.errorMsg) return "";                       // warning
         if (mode === "reader") return "";                   // book
         if (mode === "catalog") return "";                  // list
+        if (mode === "ask") return "";                   // lightbulb
         if (s && s.searching) return "";                    // magnifier
         if (query) return "";
         return "";
@@ -862,6 +1072,9 @@ Item {
     readonly property string emptyTitle: {
         var s = svc();
         if (errorMsg) return "That didn’t work";
+        if (mode === "ask")
+            return (s && s.asking) ? "Asking the guides…"
+                : root.askNotice ? "No answer this time" : "Nothing to show";
         if (mode === "reader") return (s && s.loadingPhase) ? "Opening the phase…" : "Nothing loaded yet";
         if (mode === "catalog")
             return (s && s.loadingCatalog) ? "Loading the catalog…"
@@ -876,6 +1089,9 @@ Item {
     readonly property string emptyHint: {
         var s = svc();
         if (errorMsg) return "The details are above. Try another search, or ⎋ to go back.";
+        if (mode === "ask")
+            return (s && s.asking) ? "Answers are written from the guides themselves."
+                : root.askNotice ? root.askNotice : "Press ⎋ to go back.";
         if (mode === "reader") return "Press ⎋ to go back to your results.";
         if (mode === "catalog") return catalogFilter
             ? "Backspace to widen the filter, or ⇥ to search instead."
@@ -900,6 +1116,7 @@ Item {
         // Escape unwinds one layer at a time rather than dropping everything.
         if (event.key === Qt.Key_Escape) {
             if (root.errorMsg) root.errorMsg = "";
+            else if (root.mode === "ask") root.leaveAsk();
             else if (root.mode === "reader" && reader.quizActive) reader.quizActive = false;
             else if (root.mode === "reader") root.backFromReader();
             else if (root.mode === "catalog" && root.catalogBack()) { /* went up a level */ }
@@ -910,6 +1127,8 @@ Item {
             return;
         }
 
+        if (root.mode === "ask") { root.handleAskKey(event, ctrl, shift); return; }
+
         if (root.mode === "reader") {
             // Quiz mode is a short-lived layer over the reader: it takes the
             // keys it needs and lets everything else fall through, so n/p/y/o
@@ -919,6 +1138,49 @@ Item {
             return;
         }
         root.handleListKey(event, ctrl, shift);
+    }
+
+    function handleAskKey(event, ctrl, shift) {
+        var step = Style.space(60);
+
+        // 1-9 open the Nth source. The answer names them in that order, so the
+        // numbers on screen are the numbers you press.
+        var text = event.text || "";
+        if (!ctrl && text.length === 1) {
+            var n = text.charCodeAt(0) - 49;                 // "1" -> 0
+            if (n >= 0 && n < 9 && n < root.askSources.length) {
+                root.openAskSource(n);
+                event.accepted = true;
+                return;
+            }
+        }
+
+        switch (event.key) {
+        case Qt.Key_Down: case Qt.Key_J: askReader.scrollBy(step); break;
+        case Qt.Key_Up:   case Qt.Key_K: askReader.scrollBy(-step); break;
+        case Qt.Key_PageDown: case Qt.Key_Space: askReader.scrollPage(1); break;
+        case Qt.Key_PageUp: askReader.scrollPage(-1); break;
+        case Qt.Key_Home: askReader.toTop(); break;
+        case Qt.Key_End:  askReader.toBottom(); break;
+        case Qt.Key_G: if (shift) askReader.toBottom(); else askReader.toTop(); break;
+        case Qt.Key_Y: askReader.copy(root.askBody); break;
+        case Qt.Key_Return: case Qt.Key_Enter:
+            if (root.askSources.length > 0) root.openAskSource(0);
+            break;
+        case Qt.Key_O: root.openAskInBrowser(); break;
+        case Qt.Key_Backspace: root.leaveAsk(); break;
+        case Qt.Key_Slash: root.leaveAsk(); root.setQuery(""); break;
+        case Qt.Key_Q: root.dismiss(); break;
+        default: return;
+        }
+        event.accepted = true;
+    }
+
+    function openAskInBrowser() {
+        var s = svc();
+        var base = (s && s.apiBase) || "";
+        if (!base || !root.askQuery) return;
+        Quickshell.execDetached(["xdg-open", base + "/search?q=" + encodeURIComponent(root.askQuery)]);
     }
 
     // Returns true when the quiz consumed the key.
@@ -983,6 +1245,14 @@ Item {
         var apply = isCatalog ? root.setCatalogFilter : root.setQuery;
 
         if (ctrl && event.key === Qt.Key_R) { root.pickRandom(); event.accepted = true; return; }
+
+        // "?" asks the guides. Only from search, only with something to ask,
+        // and only as a keypress -- this is the path that costs money, so it
+        // never happens while you are typing.
+        if (!isCatalog && !ctrl && event.text === "?" && text.replace(/^\s+|\s+$/g, "")) {
+            root.enterAsk(text);
+            event.accepted = true; return;
+        }
 
         switch (event.key) {
         case Qt.Key_Tab:
