@@ -38,7 +38,9 @@ Item {
     signal guideDone(var guide)
     signal catalogDone(var catalog)
     signal cheatSheetDone(var sheet)
-    signal phaseDone(string slug, int phase, string markdown, bool fromCache)
+    // `meta` is { count, next } from the response headers: 0 means unknown.
+    // A phase served from an old cache with no sidecar has no bounds.
+    signal phaseDone(string slug, int phase, string markdown, bool fromCache, var meta)
     // [{ path, w, h }] in document order, matching the Nth ```mermaid fence.
     signal diagramsDone(string slug, int phase, var diagrams)
     signal error(string msg)
@@ -92,16 +94,52 @@ Item {
         _run(cheatProc, ["curl", "-fsSL", _url("/cheat-sheet.json")]);
     }
 
+    // Body and headers come back in one stream, split by a record separator:
+    // the phase-bounds headers are the only way to know a guide has ended, and
+    // a second Process to read them would race the first.
+    readonly property string _rs: "\u001e"
+
+    function _phaseBase(slug, phase) { return cacheDir + "/" + slug + "-" + phase; }
+
     function getPhase(slug, phase) {
         if (!slug || phase < 1) return;
         _phaseSlug = slug;
         _phaseNo = phase;
         loadingPhase = true;
+        _phaseSettled = false;
         var url = _url("/guides/" + encodeURIComponent(slug) + "/" + phase + ".md");
-        var out = cacheDir + "/" + slug + "-" + phase + ".md";
-        // Fetch while teeing raw markdown into the cache file.
+        var base = _phaseBase(slug, phase);
+        // Drop the old sidecar first: curl leaves it untouched on a failed
+        // fetch, and stale bounds are worse than none.
         _run(phaseProc, ["sh", "-c",
-            "mkdir -p '" + cacheDir + "' && curl -fsSL --max-time 20 '" + url + "' | tee '" + out + "'"]);
+            "mkdir -p '" + cacheDir + "' && rm -f '" + base + ".hdr' && "
+            + "curl -fsSL -D '" + base + ".hdr' --max-time 20 '" + url + "' | tee '" + base + ".md'"
+            + "; printf '\\036'; cat '" + base + ".hdr' 2>/dev/null"]);
+    }
+
+    // x-phase-count / x-next-phase, set by the site for exactly this: the
+    // absence of x-next-phase is the "no next phase" signal. Later header
+    // blocks win, so a redirect reports its final response.
+    function _parseMeta(headers) {
+        var meta = { "count": 0, "next": 0 };
+        var lines = String(headers || "").split(/\r?\n/);
+        for (var i = 0; i < lines.length; i++) {
+            var c = /^x-phase-count:\s*(\d+)/i.exec(lines[i]);
+            if (c) { meta.count = Number(c[1]); continue; }
+            var n = /^x-next-phase:\s*(\d+)/i.exec(lines[i]);
+            if (n) meta.next = Number(n[1]);
+            // A fresh header block means a new response: forget the last next.
+            else if (/^HTTP\//i.test(lines[i])) meta.next = 0;
+        }
+        return meta;
+    }
+
+    // Split one stream into [body, headers].
+    function _splitPhase(text) {
+        var raw = String(text || "");
+        var at = raw.lastIndexOf(root._rs);
+        if (at < 0) return [raw, ""];
+        return [raw.substring(0, at), raw.substring(at + 1)];
     }
 
     // ------------------------------------------------------------ diagrams
@@ -287,10 +325,18 @@ Item {
     }
 
     // Read the cached copy of the pending phase. Used when the network call
-    // fails outright and when it succeeds with an empty body.
+    // fails outright and when it succeeds with an empty body. Both the stream
+    // and the exit code can reach here for the same request, so it is guarded:
+    // reading twice would deliver the phase twice.
+    property bool _phaseSettled: false
+
     function _readCachedPhase() {
+        if (root._phaseSettled) return;
+        root._phaseSettled = true;
+        var base = _phaseBase(root._phaseSlug, root._phaseNo);
         cacheReadProc.running = false;
-        cacheReadProc.command = ["cat", root.cacheDir + "/" + root._phaseSlug + "-" + root._phaseNo + ".md"];
+        cacheReadProc.command = ["sh", "-c",
+            "cat '" + base + ".md' 2>/dev/null; printf '\\036'; cat '" + base + ".hdr' 2>/dev/null"];
         cacheReadProc.running = true;
     }
 
@@ -298,9 +344,12 @@ Item {
         id: phaseProc
         stdout: StdioCollector {
             onStreamFinished: {
-                if (text.length > 0) {
+                var parts = root._splitPhase(text);
+                if (parts[0].length > 0) {
+                    root._phaseSettled = true;
                     root.loadingPhase = false;
-                    root.phaseDone(root._phaseSlug, root._phaseNo, text, false);
+                    root.phaseDone(root._phaseSlug, root._phaseNo, parts[0], false,
+                                   root._parseMeta(parts[1]));
                 } else {
                     // Exit code 0 with no body still leaves the reader empty,
                     // so treat it exactly like a failed fetch.
@@ -318,7 +367,10 @@ Item {
         stdout: StdioCollector {
             onStreamFinished: {
                 root.loadingPhase = false;
-                if (text.length > 0) root.phaseDone(root._phaseSlug, root._phaseNo, text, true);
+                var parts = root._splitPhase(text);
+                if (parts[0].length > 0)
+                    root.phaseDone(root._phaseSlug, root._phaseNo, parts[0], true,
+                                   root._parseMeta(parts[1]));
                 else root.error("Phase " + root._phaseNo + " is not available offline");
             }
         }

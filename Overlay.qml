@@ -42,6 +42,11 @@ Item {
     property string guideTitle: ""
     property string phaseBody: ""
     property bool phaseFromCache: false
+    // Bounds from the response headers; 0 means we do not know yet (an old
+    // cached phase has no sidecar). Never guess -- an unknown bound lets the
+    // request through, which is how this behaved before the headers existed.
+    property int phaseCount: 0
+    property int nextPhaseNo: 0
     property string returnMode: "search"
 
     // ------------------------------------------------------------- theming
@@ -223,8 +228,15 @@ Item {
     }
 
     function nextPhase() {
-        if (root.mode === "reader")
-            root.openPhase(root.currentSlug, root.currentPhase + 1, root.guideTitle);
+        if (root.mode !== "reader") return;
+        if (root.nextPhaseNo > 0) {
+            root.openPhase(root.currentSlug, root.nextPhaseNo, root.guideTitle);
+            return;
+        }
+        // The site omits x-next-phase on the last phase, and that absence is
+        // the signal. Walking off the end used to 404 into an error banner.
+        if (root.phaseCount > 0) { root.statusMsg = "That was the last phase"; return; }
+        root.openPhase(root.currentSlug, root.currentPhase + 1, root.guideTitle);
     }
 
     function openInBrowser() {
@@ -336,6 +348,16 @@ Item {
         root.openPhase(entry.slug, 1, entry.title);
     }
 
+    // A status line says what just happened; it should not still be there when
+    // you look back at the panel.
+    onStatusMsgChanged: if (statusMsg) statusReset.restart()
+
+    Timer {
+        id: statusReset
+        interval: 2600
+        onTriggered: root.statusMsg = ""
+    }
+
     Timer {
         id: searchDebounce
         interval: 240
@@ -410,9 +432,12 @@ Item {
             resultList.cursorActive = resultsModel.count > 0;
         }
 
-        function onPhaseDone(slug, phase, markdown, fromCache) {
+        function onPhaseDone(slug, phase, markdown, fromCache, meta) {
             root.currentSlug = slug;
             root.currentPhase = phase;
+            root.statusMsg = "";
+            root.phaseCount = (meta && meta.count) || 0;
+            root.nextPhaseNo = (meta && meta.next) || 0;
             root.phaseBody = root.stripFrontmatter(markdown);
             root.phaseFromCache = fromCache === true;
             var heading = Markdown.firstHeading(root.phaseBody);
@@ -476,7 +501,8 @@ Item {
         if (mode === "reader") {
             if (s && s.loadingPhase) return "loading…";
             var mins = phaseBody ? Markdown.readingMinutes(phaseBody) : 0;
-            return "phase " + currentPhase + (mins ? "  ·  " + mins + " min" : "")
+            return "phase " + currentPhase + (phaseCount > 0 ? " of " + phaseCount : "")
+                + (mins ? "  ·  " + mins + " min" : "")
                 + (phaseFromCache ? "  ·  offline" : "");
         }
         if (mode === "catalog") {
@@ -623,7 +649,7 @@ Item {
                     anchors.top: headerRule.bottom
                     anchors.left: parent.left
                     anchors.right: parent.right
-                    visible: root.errorMsg.length > 0
+                    visible: root.errorMsg.length > 0 || root.statusMsg.length > 0
                         || (root.mode === "search" && root.suggestion.length > 0)
                     height: visible ? noticeText.implicitHeight + Style.spacing.md * 2 : 0
 
@@ -634,8 +660,12 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         textFormat: Text.PlainText
                         text: root.errorMsg ? root.errorMsg
+                            : root.statusMsg ? root.statusMsg
                             : "Did you mean “" + root.suggestion + "”?  Press ⇧⏎"
-                        color: root.errorMsg ? Color.urgent : Color.accent
+                        // A status line is not a failure and not an offer:
+                        // it says what just happened and gets out of the way.
+                        color: root.errorMsg ? Color.urgent
+                            : root.statusMsg ? root.mutedColor : Color.accent
                         font.family: root.fontFamily
                         font.pixelSize: Style.font.bodySmall
                         elide: Text.ElideRight
@@ -644,7 +674,7 @@ Item {
                     MouseArea {
                         anchors.fill: parent
                         enabled: root.mode === "search" && root.suggestion.length > 0
-                            && root.errorMsg.length === 0
+                            && root.errorMsg.length === 0 && root.statusMsg.length === 0
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.setQuery(root.suggestion)
                     }
