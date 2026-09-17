@@ -3,9 +3,22 @@
 > Requires the Omarchy v4 plugin/menu APIs and the `qs.Commons` / `qs.Ui` QML
 > modules the shell ships. Not compatible with v3.
 
+> **Where the files end up.** `omarchy plugin add` clones into
+> `~/.config/omarchy/plugins/tmm.manual/` and leaves nothing in your working
+> directory — there is no repo checkout to stand in afterwards. The steps below
+> therefore point *into the installed plugin*:
+>
+> ```bash
+> P=~/.config/omarchy/plugins/tmm.manual
+> ```
+>
+> Set that once and paste the rest as-is. (The one exception is the hand-install
+> block in step 1, which is the only place you really are inside a clone.)
+
 1. Install the plugin: `omarchy plugin add <url> --enable`
 
-   Installing by hand instead? Copy **all** the QML and JS files, the logo, and
+   Installing by hand instead? From a clone of this repo, copy **all** the QML and
+   JS files, the logo, and
    the `bin/` directory — the overlay loads `Reader.qml`, `ResultList.qml`,
    `Markdown.js` and `logo.png` as siblings, and the service runs
    `bin/tmm-diagrams` from the plugin folder:
@@ -30,8 +43,15 @@
    it wants you to read them first. A disabled plugin does nothing at all when
    summoned, which looks exactly like a broken install.
 
-4. CLI: `cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm`
-5. Menu entries: `cp bin/tmm-menu ~/.local/bin/ && chmod +x ~/.local/bin/tmm-menu && tmm-menu install`
+4. CLI and menu tool:
+
+   ```bash
+   mkdir -p ~/.local/bin
+   cp "$P"/bin/tmm "$P"/bin/tmm-menu ~/.local/bin/
+   chmod +x ~/.local/bin/tmm ~/.local/bin/tmm-menu
+   ```
+
+5. Menu entries: `tmm-menu install`
 
    Do **not** `cp` the fragment over `~/.config/omarchy/extensions/omarchy-menu.jsonc`.
    Omarchy reads that one file for every user menu entry, so copying over it
@@ -39,7 +59,11 @@
    `.bak`, and refuses to write anything that would not parse.
 
 6. Refresh the menu: `omarchy menu refresh`
-7. Keybinds: append `bindings.lua.fragment` to `~/.config/hypr/bindings.lua`
+7. Keybinds:
+
+   ```bash
+   cat "$P"/bindings.lua.fragment >> ~/.config/hypr/bindings.lua
+   ```
 
 Then click the book glyph in the bar, or press `SUPER + ALT + M`, and start
 typing. If the bar button does not appear on its own:
@@ -49,17 +73,26 @@ typing. If the bar button does not appear on its own:
 
 ```bash
 omarchy plugin update tmm.manual
-omarchy-restart-shell
+omarchy-shell shell rescanPlugins
 ```
 
 That pulls the repo in place and keeps the plugin enabled, so nothing else needs
 redoing — `bin/tmm-diagrams` lives inside the plugin folder and comes with it.
-The restart matters: the shell holds the QML in memory, so an updated file does
-nothing until it reloads.
+
+`rescanPlugins` is enough on its own: it unloads the plugin's panels, services and
+widgets, clears Qt's component cache and rescans, so new QML really is picked up.
+`omarchy-restart-shell` is the stronger reset to reach for when a reload does not
+seem to have taken.
 
 Two things live outside the plugin folder and are only worth redoing when they
 change: `bin/tmm` in `~/.local/bin`, and the menu entries
 (`tmm-menu install && omarchy menu refresh`).
+
+Check which version is actually loaded:
+
+```bash
+grep version ~/.config/omarchy/plugins/tmm.manual/manifest.json
+```
 
 Old caches are safe to drop if an update seems not to have taken:
 `rm -rf ~/.cache/tmm`.

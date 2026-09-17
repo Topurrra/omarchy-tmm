@@ -338,9 +338,14 @@ Item {
         if (s) s.getPhase(slug, phase);
     }
 
+    // The ask row lives in resultsModel so it is navigable like any other, and
+    // is told apart by a slug no guide can have.
+    readonly property string askRowSlug: "\u0000ask"
+
     function activateResult(index) {
         if (index < 0 || index >= resultsModel.count) return;
         var hit = resultsModel.get(index);
+        if (hit.guide_slug === root.askRowSlug) { root.enterAsk(root.query); return; }
         root.openPhase(hit.guide_slug, hit.phase_no > 0 ? hit.phase_no : 1, hit.title);
     }
 
@@ -651,6 +656,15 @@ Item {
         var d = data || ({});
         if (d.enabled === false) { root.askDisabled = true; return; }
         var rows = Array.isArray(d.results) ? d.results : [];
+        if (root.canAsk()) {
+            resultsModel.append({
+                "title": "Ask the guides about “" + query + "”",
+                "summary": "Written from the manual, with the phases it came from",
+                "badge": "ask",
+                "guide_slug": root.askRowSlug,
+                "phase_no": 0
+            });
+        }
         for (var i = 0; i < rows.length && i < 3; i++) {
             var hit = rows[i];
             if (!hit || !hit.slug) continue;
@@ -737,7 +751,9 @@ Item {
             return catalogCategory
                 ? "type to filter  ·  ↑↓ move  ·  ⏎ read  ·  ⎋ categories  ·  ⇥ search"
                 : "type to filter  ·  ↑↓ move  ·  ⏎ open category  ·  ⇥ search  ·  ⎋ close";
-        return "type to search  ·  ↑↓ move  ·  ⏎ open  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
+        return "type to search  ·  ↑↓ move  ·  ⏎ open"
+            + (root.canAsk() ? "  ·  ? ask" : "")
+            + "  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
     }
 
     PanelWindow {
@@ -1098,12 +1114,16 @@ Item {
             : catalogCategory ? "Press ⎋ to go back to the categories."
             : "Press ⇥ to go back to search.";
         if (searchDebounce.running || (s && s.searching)) return "";
-        if (query) return root.suggestion
-            ? "Try the suggestion above, or a broader word."
-            : "Try a broader word — search tolerates typos, so “rebse” finds “rebase”.";
+        if (query) {
+            if (root.suggestion) return "Try the suggestion above, or a broader word.";
+            // When keyword search has nothing, asking beats rewording.
+            return (root.canAsk() ? "Press ? to ask the guides about it, or try a " : "Try a ")
+                + "broader word — search tolerates typos, so “rebse” finds “rebase”.";
+        }
         var n = (s && s.catalogCache) ? s.catalogCache.length : 0;
         return (n > 0 ? n + " guides ready. " : "")
             + "Start typing to search, press ⇥ to browse the catalog,\n"
+            + (root.canAsk() ? "? to ask the guides a question, " : "")
             + "or ^r to open something at random.";
     }
 
