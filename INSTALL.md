@@ -3,7 +3,7 @@
 > Requires the Omarchy v4 plugin/menu APIs and the `qs.Commons` / `qs.Ui` QML
 > modules the shell ships. Not compatible with v3.
 
-1. Install the plugin: `omarchy plugin add <url>`
+1. Install the plugin: `omarchy plugin add <url> --enable`
 
    Installing by hand instead? Copy **all** the QML and JS files plus the logo —
    the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and
@@ -16,7 +16,7 @@
    ```
 
 2. Rescan so the shell sees it: `omarchy-shell shell rescanPlugins`
-3. **Enable it: `omarchy plugin enable tmm.manual`**
+3. **If you copied by hand, or left `--enable` off: `omarchy plugin enable tmm.manual`**
 
    Omarchy installs plugins disabled on purpose — they are unsandboxed code and
    it wants you to read them first. A disabled plugin does nothing at all when
@@ -43,6 +43,11 @@ Then press `SUPER + ALT + M` and start typing.
   `omarchy-shell shell summon tmm.manual` — it prints `ok` or `unknown`.
 - Menu rows showing the words `search` / `shuffle` instead of icons means an
   old `omarchy-menu.jsonc`; re-copy it and run `omarchy menu refresh`.
+- `summon` says `ok` but nothing appears? The plugin loaded and a QML error
+  stopped it drawing. The shell logs to the journal under its own tag:
+  `journalctl -t omarchy-shell -n 100 --no-pager`, or `-f` to watch live while
+  you summon. After editing plugin files, `omarchy-restart-shell` is a cleaner
+  reset than `rescanPlugins`.
 - Check the API: `curl -fsSL "$TMM_BASE/search.json?q=git" | head -c 200`
   (default `TMM_BASE=https://themissingmanual.dev`)
 - Overlay opens but looks unstyled: the shell could not resolve `qs.Commons`;

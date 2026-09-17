@@ -235,6 +235,20 @@ omarchy-shell shell rescanPlugins
 
   `summon` answers `ok` on success; `unknown` means the shell has no such
   plugin loaded, which sends you back to steps 1–3.
+
+  **`ok` but still nothing on screen?** Then the plugin loaded and a QML error
+  stopped it drawing. `omarchy-launch-shell` runs Quickshell under
+  `systemd-cat -t omarchy-shell`, so the error is in the journal:
+
+  ```bash
+  journalctl -t omarchy-shell -n 100 --no-pager | grep -i -A3 'tmm\|error\|warning'
+
+  # watch it live while you summon from another terminal
+  journalctl -t omarchy-shell -f
+  ```
+
+  `rescanPlugins` hot-reloads plugin code, but after editing files a full
+  restart is the honest reset: `omarchy-restart-shell`.
 - **Overlay appears unstyled**: you are on an Omarchy build without `qs.Commons` / `qs.Ui`; this plugin targets v4 Quattro.
 - **Copy does nothing**: install `wl-copy` (`wl-clipboard`).
 - **Menu rows show words like `search` instead of icons**: you have an old copy of `extensions/omarchy-menu.jsonc`. The menu draws `icon` literally, so it must be a Nerd Font glyph. Re-copy the fragment and run `omarchy menu refresh`.
