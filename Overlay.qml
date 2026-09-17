@@ -30,6 +30,9 @@ Item {
     property string mode: "search"   // search | reader | catalog
     property string query: ""
     property string catalogFilter: ""
+    // Catalog is two levels: the category list, then the guides inside one.
+    // "" means we are at the top level.
+    property string catalogCategory: ""
     property string suggestion: ""
     property string statusMsg: ""
     property string errorMsg: ""
@@ -205,6 +208,12 @@ Item {
     function activateCatalog(index) {
         if (index < 0 || index >= catalogModel.count) return;
         var entry = catalogModel.get(index);
+        if (entry.kind === "category") {
+            root.catalogCategory = entry.title;
+            root.catalogFilter = "";
+            root.rebuildCatalog();
+            return;
+        }
         root.openPhase(entry.guide_slug, 1, entry.title);
     }
 
@@ -234,6 +243,8 @@ Item {
     function showCatalog() {
         root.mode = "catalog";
         root.errorMsg = "";
+        root.catalogCategory = "";
+        root.catalogFilter = "";
         var s = safeCall("getCatalog");
         if (s) s.getCatalog();
         root.rebuildCatalog();
@@ -249,20 +260,57 @@ Item {
         var all = (s && s.catalogCache) || [];
         var needle = root.catalogFilter.toLowerCase().replace(/^\s+|\s+$/g, "");
         catalogModel.clear();
-        for (var i = 0; i < all.length; i++) {
-            var entry = all[i];
-            if (needle && (String(entry.title) + " " + String(entry.summary) + " " + String(entry.slug))
-                    .toLowerCase().indexOf(needle) < 0) continue;
-            catalogModel.append({
-                "title": entry.title,
-                "summary": "",
-                "badge": entry.summary || "",
-                "guide_slug": entry.slug,
-                "phase_no": 0
-            });
+
+        if (!root.catalogCategory) {
+            // Top level: one row per category, with how many guides it holds.
+            var names = [], counts = ({});
+            for (var i = 0; i < all.length; i++) {
+                var c = String(all[i].summary || "Uncategorised");
+                if (counts[c] === undefined) { counts[c] = 0; names.push(c); }
+                counts[c] += 1;
+            }
+            names.sort();
+            for (var j = 0; j < names.length; j++) {
+                var name = names[j];
+                if (needle && name.toLowerCase().indexOf(needle) < 0) continue;
+                catalogModel.append({
+                    "kind": "category",
+                    "title": name,
+                    "summary": "",
+                    "badge": counts[name] + (counts[name] === 1 ? " guide" : " guides"),
+                    "guide_slug": "",
+                    "phase_no": 0
+                });
+            }
+        } else {
+            for (var k = 0; k < all.length; k++) {
+                var entry = all[k];
+                if (String(entry.summary || "") !== root.catalogCategory) continue;
+                if (needle && (String(entry.title) + " " + String(entry.slug))
+                        .toLowerCase().indexOf(needle) < 0) continue;
+                catalogModel.append({
+                    "kind": "guide",
+                    "title": entry.title,
+                    "summary": "",
+                    "badge": "",
+                    "guide_slug": entry.slug,
+                    "phase_no": 0
+                });
+            }
         }
         catalogList.cursorIndex = 0;
         catalogList.cursorActive = catalogModel.count > 0;
+    }
+
+    // Up one level; returns false when already at the top.
+    function catalogBack() {
+        if (root.catalogFilter) { root.setCatalogFilter(""); return true; }
+        if (root.catalogCategory) {
+            root.catalogCategory = "";
+            root.rebuildCatalog();
+            return true;
+        }
+        return false;
     }
 
     // Set when a random pick was asked for before the catalog had arrived.
@@ -350,13 +398,17 @@ Item {
 
     readonly property string headline: {
         if (mode === "reader") return guideTitle || currentSlug;
-        if (mode === "catalog") return catalogFilter || "Filter the catalog…";
+        if (mode === "catalog") {
+            if (catalogFilter) return catalogFilter;
+            return catalogCategory ? catalogCategory : "Browse by category…";
+        }
         if (query) return query;
         return showingRecents ? "Pick up where you left off…" : "Search the manual…";
     }
 
     readonly property bool headlineIsPlaceholder:
-        (mode === "search" && !query) || (mode === "catalog" && !catalogFilter)
+        (mode === "search" && !query)
+        || (mode === "catalog" && !catalogFilter && !catalogCategory)
 
     readonly property string headerStatus: {
         var s = svc();
@@ -368,7 +420,9 @@ Item {
         }
         if (mode === "catalog") {
             if (s && s.loadingCatalog && catalogModel.count === 0) return "loading…";
-            return catalogModel.count + (catalogModel.count === 1 ? " guide" : " guides");
+            var n = catalogModel.count;
+            if (!catalogCategory) return n + (n === 1 ? " category" : " categories");
+            return n + (n === 1 ? " guide" : " guides");
         }
         if (searchDebounce.running || (s && s.searching)) return "searching…";
         if (showingRecents) return "recent";
@@ -380,7 +434,9 @@ Item {
         if (mode === "reader")
             return "↑↓ scroll  ·  n/p phase  ·  y copy  ·  o browser  ·  ⎋ back";
         if (mode === "catalog")
-            return "type to filter  ·  ↑↓ move  ·  ⏎ open  ·  ⇥ search  ·  ⎋ close";
+            return catalogCategory
+                ? "type to filter  ·  ↑↓ move  ·  ⏎ read  ·  ⎋ categories  ·  ⇥ search"
+                : "type to filter  ·  ↑↓ move  ·  ⏎ open category  ·  ⇥ search  ·  ⎋ close";
         return "type to search  ·  ↑↓ move  ·  ⏎ open  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
     }
 
@@ -699,7 +755,8 @@ Item {
         if (mode === "reader") return (s && s.loadingPhase) ? "Opening the phase…" : "Nothing loaded yet";
         if (mode === "catalog")
             return (s && s.loadingCatalog) ? "Loading the catalog…"
-                : catalogFilter ? "No guide matches “" + catalogFilter + "”"
+                : catalogFilter ? "Nothing matches “" + catalogFilter + "”"
+                : catalogCategory ? "No guides in " + catalogCategory
                 : "The catalog is empty";
         if (searchDebounce.running || (s && s.searching)) return "Searching…";
         if (query) return "No matches for “" + query + "”";
@@ -712,6 +769,7 @@ Item {
         if (mode === "reader") return "Press ⎋ to go back to your results.";
         if (mode === "catalog") return catalogFilter
             ? "Backspace to widen the filter, or ⇥ to search instead."
+            : catalogCategory ? "Press ⎋ to go back to the categories."
             : "Press ⇥ to go back to search.";
         if (searchDebounce.running || (s && s.searching)) return "";
         if (query) return root.suggestion
@@ -733,7 +791,7 @@ Item {
         if (event.key === Qt.Key_Escape) {
             if (root.errorMsg) root.errorMsg = "";
             else if (root.mode === "reader") root.backFromReader();
-            else if (root.mode === "catalog" && root.catalogFilter) root.setCatalogFilter("");
+            else if (root.mode === "catalog" && root.catalogBack()) { /* went up a level */ }
             else if (root.mode === "catalog") root.mode = "search";
             else if (root.query) root.setQuery("");
             else root.dismiss();
@@ -802,6 +860,12 @@ Item {
 
         if (Util.editsFilter(event, text)) {
             apply(Util.editedFilter(event, text));
+            event.accepted = true; return;
+        }
+
+        // Backspace with nothing left to delete climbs out of a category.
+        if (isCatalog && !text && event.key === Qt.Key_Backspace) {
+            root.catalogBack();
             event.accepted = true; return;
         }
 

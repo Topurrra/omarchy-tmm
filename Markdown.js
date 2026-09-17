@@ -104,6 +104,50 @@ function _isTableDivider(line) {
         (line.indexOf("|") >= 0);
 }
 
+// Interactive fences carry structured data rather than source to display.
+// Anything that fails to parse falls back to a plain code block: a malformed
+// quiz should still show its content, never vanish.
+function _fencedBlock(lang, text) {
+    var kind = String(lang || "").toLowerCase();
+
+    if (kind === "quiz") {
+        try {
+            var questions = JSON.parse(text);
+            if (Array.isArray(questions) && questions.length) {
+                var ok = true;
+                for (var i = 0; i < questions.length; i++) {
+                    var q = questions[i];
+                    if (!q || typeof q.q !== "string" || !Array.isArray(q.choices)
+                            || typeof q.answer !== "number"
+                            || q.answer < 0 || q.answer >= q.choices.length) { ok = false; break; }
+                }
+                if (ok) return { type: "quiz", questions: questions };
+            }
+        } catch (e) { /* fall through to a code block */ }
+    }
+
+    if (kind === "lesson" || kind === "exercise") {
+        try {
+            var lesson = JSON.parse(text);
+            if (lesson && typeof lesson === "object" && !Array.isArray(lesson)
+                    && (lesson.starterCode || lesson.solution)) {
+                return { type: "lesson", lang: kind, lesson: lesson };
+            }
+        } catch (e) { /* fall through */ }
+    }
+
+    // Diagrams have a themed SVG upstream; the reader fetches and recolors it.
+    if (kind === "mermaid") return { type: "diagram", kind: kind, text: text };
+
+    // Browser-only widgets. We cannot run them, but we can say what they are
+    // instead of printing their JSON.
+    if (kind.indexOf("playground-") === 0 || kind.indexOf("explainer-") === 0) {
+        return { type: "embed", kind: kind, text: text };
+    }
+
+    return { type: "code", lang: lang || "", text: text };
+}
+
 // Parse a phase document into blocks the reader can draw.
 //
 // Block shapes:
@@ -142,11 +186,7 @@ function parseBlocks(md) {
                 if (new RegExp("^\\s*" + marker + "{3,}\\s*$").test(lines[i])) break;
                 body.push(lines[i]);
             }
-            blocks.push({
-                type: "code",
-                lang: fence[2] || "",
-                text: body.join("\n").replace(/\s+$/, "")
-            });
+            blocks.push(_fencedBlock(fence[2] || "", body.join("\n").replace(/\s+$/, "")));
             continue;
         }
 
@@ -215,6 +255,21 @@ function firstHeading(md) {
     return "";
 }
 
+// Search snippets arrive as HTML carrying <b> marks around the matched words.
+// Keep those as an accent-coloured span and escape everything else.
+function highlight(snippet, color) {
+    var parts = String(snippet === undefined || snippet === null ? "" : snippet).split(/(<\/?b>)/i);
+    var out = "", open = false;
+    for (var i = 0; i < parts.length; i++) {
+        var p = parts[i];
+        if (/^<b>$/i.test(p)) { open = true; continue; }
+        if (/^<\/b>$/i.test(p)) { open = false; continue; }
+        var text = escapeHtml(p);
+        out += open ? '<font color="' + (color || "#8aa9d6") + '">' + text + "</font>" : text;
+    }
+    return out;
+}
+
 // Rough reading time in minutes, floored at 1. Code counts for less than
 // prose because nobody reads a shell snippet word by word.
 function readingMinutes(md) {
@@ -223,6 +278,9 @@ function readingMinutes(md) {
     for (var i = 0; i < blocks.length; i++) {
         var b = blocks[i];
         if (b.type === "rule" || b.type === "table") continue;
+        // Answering a question is real time even though it is not prose.
+        if (b.type === "quiz") { words += (b.questions.length || 0) * 100; continue; }
+        if (b.type === "diagram" || b.type === "embed" || b.type === "lesson") continue;
         var n = String(b.text || "").split(/\s+/).length;
         words += (b.type === "code") ? n * 0.4 : n;
     }
