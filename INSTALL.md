@@ -12,7 +12,8 @@
    ```bash
    mkdir -p ~/.config/omarchy/plugins/tmm.manual
    cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml \
-      Model.js Markdown.js logo.png ~/.config/omarchy/plugins/tmm.manual/
+      BarWidget.qml Model.js Markdown.js logo.png \
+      ~/.config/omarchy/plugins/tmm.manual/
    ```
 
 2. Rescan so the shell sees it: `omarchy-shell shell rescanPlugins`
@@ -27,7 +28,9 @@
 6. Refresh the menu: `omarchy menu refresh`
 7. Keybinds: append `bindings.lua.fragment` to `~/.config/hypr/bindings.lua`
 
-Then press `SUPER + ALT + M` and start typing.
+Then click the book glyph in the bar, or press `SUPER + ALT + M`, and start
+typing. If the bar button does not appear on its own:
+`omarchy bar put tmm.manual --section right`.
 
 ## Optional
 

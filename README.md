@@ -35,6 +35,7 @@ Switch themes and the reader repaints with the desktop.
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
 - **Catalog browser** with instant local filtering (the catalog is fetched once per session)
 - **Offline fallback** — a phase you have read before still opens with no network, and says so
+- **A bar button** — a book glyph in the Omarchy bar that toggles the overlay, so there is always something to click
 - **A CLI that matches** — `tmm read` renders the same markdown with ANSI styling
 
 ## Requirements
@@ -65,11 +66,12 @@ looks exactly like a broken install.
 
 ### Option B: manual install
 
-Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings.
+Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings, and `BarWidget.qml` is the bar button.
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/tmm.manual
-cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml Model.js Markdown.js logo.png \
+cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml BarWidget.qml \
+   Model.js Markdown.js logo.png \
    ~/.config/omarchy/plugins/tmm.manual/
 cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm
 omarchy-shell shell rescanPlugins
@@ -92,7 +94,21 @@ See [INSTALL.md](INSTALL.md) for the short checklist and troubleshooting.
 
 ## Usage
 
-Open it with `SUPER + ALT + M`, or from a terminal:
+There are three ways in, and all of them go through the same shell IPC:
+
+1. **The bar button** — a book glyph, added to the right of the bar when the
+   plugin is enabled. Click it to toggle the overlay.
+2. **`SUPER + ALT + M`** — requires `bindings.lua.fragment` to be appended to
+   `~/.config/hypr/bindings.lua`.
+3. **The menu** — *Missing Manual*, from `extensions/omarchy-menu.jsonc`.
+
+If the bar button is not there after enabling the plugin, place it by hand:
+
+```bash
+omarchy bar put tmm.manual --section right
+```
+
+Or from a terminal:
 
 ```bash
 omarchy-shell shell toggle tmm.manual
@@ -187,6 +203,7 @@ Repo layout:
 ```
 manifest.json                  # id tmm.manual, kinds overlay + service
 Overlay.qml                    # layer-shell overlay: search / reader / catalog
+BarWidget.qml                  # bar button that toggles the overlay
 Reader.qml                     # markdown blocks drawn as themed QML
 ResultList.qml                 # keyboard-first list, shared by search and catalog
 Service.qml                    # headless API client, cache, recents, signals
