@@ -22,6 +22,9 @@ Flickable {
     // so the text stops well short of a wide card.
     property int columnWidth: Math.min(width, Style.space(760))
     property string copiedText: ""
+    // [{path, w, h}] from Service.getDiagrams, in the same order as the
+    // `diagram` blocks. Empty until they arrive, or if they never do.
+    property var diagrams: []
 
     readonly property var blocks: Markdown.parseBlocks(markdown)
 
@@ -159,7 +162,8 @@ Flickable {
                 height: item ? item.implicitHeight : 0
                 sourceComponent: blk.type === "heading" ? headingBlock
                     : blk.type === "quiz" ? quizBlock
-                    : blk.type === "diagram" || blk.type === "embed" ? embedBlock
+                    : blk.type === "diagram" ? diagramBlock
+                    : blk.type === "embed" ? embedCard
                     : blk.type === "lesson" ? lessonBlock
                     : blk.type === "code" ? codeBlock
                     : blk.type === "bullet" ? bulletBlock
@@ -398,17 +402,62 @@ Flickable {
         }
     }
 
+    // A baked, recoloured diagram. Falls back to the plain card whenever the
+    // SVG is not there yet, could not be fetched, or Qt cannot draw it -- the
+    // one thing it never does is print the mermaid source.
+    Component {
+        id: diagramBlock
+        Item {
+            id: diagramRoot
+            implicitHeight: shown ? image.height + Style.space(18)
+                                  : fallback.implicitHeight
+
+            // `blk` reaches us through the delegate Loader's context object, so a
+            // nested Loader cannot see it -- hand it down explicitly.
+            readonly property var blkRef: blk
+            readonly property var info: reader.diagrams[blk.ord] || null
+            readonly property bool shown: info !== null && image.status === Image.Ready
+            // Size from the viewBox: QSvgRenderer's own defaultSize is not
+            // reliable across the three root shapes the engine emits.
+            readonly property real ratio: (info && info.w > 0 && info.h > 0)
+                ? info.h / info.w : 0.5
+
+            Image {
+                id: image
+                visible: diagramRoot.shown
+                y: Style.space(9)
+                width: parent.width
+                height: Math.round(parent.width * diagramRoot.ratio)
+                source: diagramRoot.info ? "file://" + diagramRoot.info.path : ""
+                sourceSize.width: Math.round(parent.width * 2)   // crisp on HiDPI
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                smooth: true
+            }
+
+            Loader {
+                id: fallback
+                property var blk: diagramRoot.blkRef
+                width: parent.width
+                active: !diagramRoot.shown
+                sourceComponent: embedCard
+            }
+        }
+    }
+
     // Diagrams and browser-only widgets. Never the raw source: a wall of
     // mermaid DSL or widget JSON is worse than a line saying what it is.
+    // Used directly for `embed` blocks and as diagramBlock's fallback, so it
+    // reads `blk` from whichever Loader instantiates it.
     Component {
-        id: embedBlock
+        id: embedCard
         Item {
             id: embedRoot
-            implicitHeight: embedCard.height + Style.space(14)
+            implicitHeight: card.height + Style.space(14)
             readonly property bool isDiagram: blk.type === "diagram"
 
             Rectangle {
-                id: embedCard
+                id: card
                 width: parent.width
                 height: embedLabel.implicitHeight + Style.space(20)
                 radius: Style.cornerRadius

@@ -137,7 +137,7 @@ function _fencedBlock(lang, text) {
     }
 
     // Diagrams have a themed SVG upstream; the reader fetches and recolors it.
-    if (kind === "mermaid") return { type: "diagram", kind: kind, text: text };
+    if (kind === "mermaid") return { type: "diagram", kind: kind, text: text, ord: 0 };
 
     // Browser-only widgets. We cannot run them, but we can say what they are
     // instead of printing their JSON.
@@ -243,6 +243,13 @@ function parseBlocks(md) {
     }
 
     flushPara();
+
+    // The Nth diagram block matches the Nth baked figure in the phase HTML,
+    // which is the only handle we get -- the figures carry no id.
+    var ord = 0;
+    for (var b = 0; b < blocks.length; b++)
+        if (blocks[b].type === "diagram") blocks[b].ord = ord++;
+
     return blocks;
 }
 

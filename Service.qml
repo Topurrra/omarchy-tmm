@@ -28,6 +28,10 @@ Item {
     // Cached for the session: /llms.txt is ~400 entries and never changes
     // mid-session, so the catalog opens instantly after the first fetch.
     property var catalogCache: []
+    // Diagrams are extracted once per phase per session; the files themselves
+    // live in the cache dir and survive restarts.
+    property var diagramCache: ({})
+    property string diagramDir: cacheDir + "/diagrams"
     property var recents: []
 
     signal searchDone(var result)
@@ -35,6 +39,8 @@ Item {
     signal catalogDone(var catalog)
     signal cheatSheetDone(var sheet)
     signal phaseDone(string slug, int phase, string markdown, bool fromCache)
+    // [{ path, w, h }] in document order, matching the Nth ```mermaid fence.
+    signal diagramsDone(string slug, int phase, var diagrams)
     signal error(string msg)
 
     // Pending request context (each proc is single-flight).
@@ -96,6 +102,75 @@ Item {
         // Fetch while teeing raw markdown into the cache file.
         _run(phaseProc, ["sh", "-c",
             "mkdir -p '" + cacheDir + "' && curl -fsSL --max-time 20 '" + url + "' | tee '" + out + "'"]);
+    }
+
+    // ------------------------------------------------------------ diagrams
+    //
+    // The site bakes every ```mermaid fence to SVG with sentinel colours its
+    // own CSS remaps. bin/tmm-diagrams pulls those figures out of the phase
+    // HTML and swaps the sentinels for the theme we hand it, writing one file
+    // per diagram -- QML's Image cannot load a data: URI, so a file it is.
+
+    property string _diagSlug: ""
+    property int _diagPhase: 0
+    property string _diagKey: ""
+
+    function _scriptPath(name) {
+        // Resolve a sibling script inside the plugin directory.
+        return String(Qt.resolvedUrl("bin/" + name)).replace(/^file:\/\//, "");
+    }
+
+    function getDiagrams(slug, phase, colours) {
+        // The command goes through `sh -c`, so the slug is interpolated into a
+        // quoted string. Catalog slugs are URL-safe by construction, but that
+        // is the server's invariant, not ours.
+        if (!slug || phase < 1 || !/^[A-Za-z0-9._-]+$/.test(slug)) return;
+        var key = slug + "/" + phase;
+        if (diagramCache[key]) { root.diagramsDone(slug, phase, diagramCache[key]); return; }
+
+        _diagSlug = slug; _diagPhase = phase; _diagKey = key;
+        var args = "";
+        for (var name in colours) {
+            var value = String(colours[name]);
+            if (/^#[0-9A-Fa-f]{3,8}$/.test(value)) args += " --colour " + name + "=" + value;
+        }
+        var url = _url("/guides/" + encodeURIComponent(slug) + "/" + phase);
+        _run(diagramProc, ["sh", "-c",
+            "curl -fsSL --max-time 20 '" + url + "' | '" + _scriptPath("tmm-diagrams")
+            + "' '" + diagramDir + "' '" + slug + "-" + phase + "'" + args]);
+    }
+
+    Process {
+        id: diagramProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var list = [];
+                var lines = String(text || "").split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    if (!lines[i]) continue;
+                    var parts = lines[i].split("\t");
+                    if (!parts[0]) continue;
+                    list.push({
+                        "path": parts[0],
+                        "w": Number(parts[1]) || 0,
+                        "h": Number(parts[2]) || 0
+                    });
+                }
+                // Cache even an empty result: a phase whose diagrams the server
+                // could not render should not be refetched on every open.
+                var next = ({});
+                for (var k in root.diagramCache) next[k] = root.diagramCache[k];
+                next[root._diagKey] = list;
+                root.diagramCache = next;
+                root.diagramsDone(root._diagSlug, root._diagPhase, list);
+            }
+        }
+        stderr: StdioCollector {}
+        // A failure here is not worth an error banner: the reader falls back to
+        // a card naming the diagram, which is what it shows while loading too.
+        onExited: code => {
+            if (code !== 0) root.diagramsDone(root._diagSlug, root._diagPhase, []);
+        }
     }
 
     // ------------------------------------------------------------- recents

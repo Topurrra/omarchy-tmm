@@ -342,6 +342,50 @@ Item {
         onTriggered: root.runSearch()
     }
 
+    // ------------------------------------------------------------ diagrams
+    //
+    // The baked SVGs carry sentinel colours that the site's CSS remaps; we do
+    // the same substitution against the active theme. SVG Tiny has no alpha
+    // channel in its colour grammar and Qt prints an alpha colour as
+    // #aarrggbb, which an SVG parser reads as #rrggbbaa -- so every token is
+    // flattened to an opaque #rrggbb over the panel background first.
+    function opaqueHex(c) {
+        var a = c.a === undefined ? 1 : c.a;
+        var bg = root.background;
+        function part(x, y) {
+            var v = Math.round(255 * (x * a + y * (1 - a)));
+            v = Math.max(0, Math.min(255, v));
+            return (v < 16 ? "0" : "") + v.toString(16);
+        }
+        return "#" + part(c.r, bg.r) + part(c.g, bg.g) + part(c.b, bg.b);
+    }
+
+    function diagramColours() {
+        return {
+            "fill": opaqueHex(Util.alpha(root.foreground, 0.06)),
+            "stroke": opaqueHex(Color.accent),
+            "text": opaqueHex(root.foreground),
+            "edge": opaqueHex(root.mutedColor),
+            "subfill": opaqueHex(Util.alpha(root.foreground, 0.03)),
+            "substroke": opaqueHex(root.dividerColor),
+            "note": opaqueHex(Util.alpha(Color.accent, 0.18)),
+            "ink": opaqueHex(root.foreground),
+            "line": opaqueHex(root.dividerColor)
+        };
+    }
+
+    function fetchDiagrams(slug, phase, body) {
+        reader.diagrams = [];
+        var blocks = Markdown.parseBlocks(body);
+        var wanted = 0;
+        for (var i = 0; i < blocks.length; i++)
+            if (blocks[i].type === "diagram") wanted++;
+        if (wanted === 0) return;
+        var s = svc();
+        if (s && typeof s.getDiagrams === "function")
+            s.getDiagrams(slug, phase, diagramColours());
+    }
+
     // ---------------------------------------------------------- service bus
 
     Connections {
@@ -381,6 +425,14 @@ Item {
             var s = root.svc();
             if (s && typeof s.rememberPhase === "function")
                 s.rememberPhase(slug, phase, root.guideTitle);
+            root.fetchDiagrams(slug, phase, root.phaseBody);
+        }
+
+        function onDiagramsDone(slug, phase, diagrams) {
+            // A phase the user has already paged away from must not repaint
+            // the one they are reading now.
+            if (slug !== root.currentSlug || phase !== root.currentPhase) return;
+            reader.diagrams = diagrams || [];
         }
 
         function onCatalogDone(catalog) {
@@ -614,6 +666,7 @@ Item {
                         visible: root.mode === "search" && resultsModel.count > 0
                         model: resultsModel
                         foreground: root.foreground
+                        accentColor: Color.accent
                         mutedColor: root.mutedColor
                         selectedBackground: root.selectedBackground
                         selectedText: root.selectedText

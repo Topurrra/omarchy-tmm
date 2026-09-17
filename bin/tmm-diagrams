@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Extract The Missing Manual's pre-baked mermaid SVGs and recolour them.
+
+The site renders every ```mermaid fence to static SVG at ingest, using sentinel
+colours that its own CSS remaps to the active theme. We do the same
+substitution here so a diagram follows the Omarchy theme, then write each SVG
+to a file -- QML's Image silently never loads a `data:` URI, so a file it must
+be.
+
+Reads the phase HTML on stdin, writes <outdir>/<base>-<n>.svg for each figure
+in document order, and prints the paths it wrote, one per line. The Nth figure
+corresponds to the Nth ```mermaid fence in the phase markdown.
+
+Usage:
+    curl -fsSL <phase-url> | tmm-diagrams <outdir> <base> [--colour name=#rgb ...]
+
+Colour names: fill stroke text edge subfill substroke note ink line
+A phase whose diagram the server failed to render leaves a plain
+<pre><code class="language-mermaid"> block, which yields no figure here -- the
+caller then shows its own fallback card.
+"""
+
+import argparse
+import os
+import re
+import sys
+
+FIGURE = re.compile(
+    r'<figure[^>]*class="[^"]*\bmmd-ssr\b[^"]*"[^>]*>(.*?)</figure>', re.S | re.I)
+
+# Sentinels from platform/core/src/mermaid_ssr.rs::sentinel_theme(), plus the
+# literal colours sequenceDiagram bakes in that app.css remaps by attribute.
+DEFAULTS = {
+    "fill": "#16181d", "stroke": "#8aa9d6", "text": "#cacccc", "edge": "#7d8894",
+    "subfill": "#101315", "substroke": "#3a4048", "note": "#2a2d33",
+    "ink": "#cacccc", "line": "#3a4048",
+}
+SENTINELS = [
+    ("#ff00f1", "fill"), ("#ff00f2", "stroke"), ("#ff00f3", "text"),
+    ("#ff00f4", "edge"), ("#ff00f5", "subfill"), ("#ff00f6", "substroke"),
+    # sequenceDiagram literals
+    ("#fff2b0", "note"), ("#333333", "ink"), ("#d7c8f8", "line"), ("#4c3f6f", "ink"),
+]
+
+
+def extract(html):
+    """Each figure's SVG, in document order."""
+    out = []
+    for body in FIGURE.findall(html):
+        start = body.find("<svg")
+        end = body.rfind("</svg>")
+        if start == -1 or end == -1:
+            continue                      # not an SVG figure; skip it
+        out.append(body[start:end + len("</svg>")])
+    return out
+
+
+def recolour(svg, colours):
+    for sentinel, name in SENTINELS:
+        svg = re.sub(re.escape(sentinel), colours[name], svg, flags=re.I)
+    # Edge-label backgrounds are baked as an rgba() wash.
+    svg = re.sub(r"rgba\(\s*232\s*,\s*232\s*,\s*232\s*,[^)]*\)", colours["fill"], svg)
+    # "transparent" is a CSS keyword and not valid in SVG Tiny's colour grammar;
+    # Qt skipping it happens to look right, but say what we mean.
+    svg = svg.replace('fill="transparent"', 'fill="none"')
+    # width="100%" is meaningless without a CSS layout and makes Qt guess.
+    # Sizing comes from the viewBox instead.
+    svg = re.sub(r'\swidth="100%"', "", svg)
+    return svg
+
+
+def view_box(svg):
+    """(minX, minY, w, h) or None. Origins are not always 0 0."""
+    m = re.search(r'viewBox="\s*([-\d.]+)[,\s]+([-\d.]+)[,\s]+([-\d.]+)[,\s]+([-\d.]+)', svg)
+    if not m:
+        return None
+    try:
+        return tuple(float(g) for g in m.groups())
+    except ValueError:
+        return None
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="tmm-diagrams", add_help=True)
+    ap.add_argument("outdir")
+    ap.add_argument("base")
+    ap.add_argument("--colour", "--color", action="append", default=[],
+                    metavar="name=#rrggbb", dest="colour")
+    args = ap.parse_args()
+
+    colours = dict(DEFAULTS)
+    for item in args.colour:
+        name, _, value = item.partition("=")
+        if name in colours and re.fullmatch(r"#[0-9A-Fa-f]{3,8}", value or ""):
+            colours[name] = value
+
+    html = sys.stdin.read()
+    svgs = extract(html)
+    if not svgs:
+        return 0
+
+    os.makedirs(args.outdir, exist_ok=True)
+    for i, svg in enumerate(svgs, start=1):
+        themed = recolour(svg, colours)
+        path = os.path.join(args.outdir, "%s-%d.svg" % (args.base, i))
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(themed)
+        os.replace(tmp, path)
+        box = view_box(themed)
+        # path<TAB>width<TAB>height -- the caller sizes from the viewBox, since
+        # QSvgRenderer.defaultSize() is unreliable across these three root shapes.
+        print("%s\t%s\t%s" % (path,
+                              ("%.0f" % box[2]) if box else "",
+                              ("%.0f" % box[3]) if box else ""))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except BrokenPipeError:
+        sys.exit(0)
