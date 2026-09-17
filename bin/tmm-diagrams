@@ -13,6 +13,11 @@ corresponds to the Nth ```mermaid fence in the phase markdown.
 
 Usage:
     curl -fsSL <phase-url> | tmm-diagrams <outdir> <base> [--colour name=#rgb ...]
+                                                         [--prune <prefix>]
+
+--prune removes files starting with <prefix> that this run did not write. The
+caller puts a theme fingerprint in <base>, so switching Omarchy themes replaces
+a phase's diagrams instead of accumulating one set per theme ever tried.
 
 Colour names: fill stroke text edge subfill substroke note ink line
 A phase whose diagram the server failed to render leaves a plain
@@ -86,6 +91,7 @@ def main():
     ap.add_argument("base")
     ap.add_argument("--colour", "--color", action="append", default=[],
                     metavar="name=#rrggbb", dest="colour")
+    ap.add_argument("--prune", metavar="prefix", default=None)
     args = ap.parse_args()
 
     colours = dict(DEFAULTS)
@@ -96,10 +102,9 @@ def main():
 
     html = sys.stdin.read()
     svgs = extract(html)
-    if not svgs:
-        return 0
 
     os.makedirs(args.outdir, exist_ok=True)
+    written = set()
     for i, svg in enumerate(svgs, start=1):
         themed = recolour(svg, colours)
         path = os.path.join(args.outdir, "%s-%d.svg" % (args.base, i))
@@ -107,12 +112,23 @@ def main():
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(themed)
         os.replace(tmp, path)
+        written.add(os.path.basename(path))
         box = view_box(themed)
         # path<TAB>width<TAB>height -- the caller sizes from the viewBox, since
         # QSvgRenderer.defaultSize() is unreliable across these three root shapes.
         print("%s\t%s\t%s" % (path,
                               ("%.0f" % box[2]) if box else "",
                               ("%.0f" % box[3]) if box else ""))
+
+    if args.prune:
+        # Best effort: a diagram we cannot delete is wasted disk, not a failure,
+        # and the caller is already holding the files it asked for.
+        for name in os.listdir(args.outdir):
+            if name.startswith(args.prune) and name not in written:
+                try:
+                    os.remove(os.path.join(args.outdir, name))
+                except OSError:
+                    pass
     return 0
 
 

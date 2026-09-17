@@ -158,12 +158,28 @@ Item {
         return String(Qt.resolvedUrl("bin/" + name)).replace(/^file:\/\//, "");
     }
 
+    // Short, stable fingerprint of a colour set. Not a checksum -- it only has
+    // to change when the theme does, and name a file.
+    function _themeKey(colours) {
+        var names = Object.keys(colours).sort();
+        var flat = "";
+        for (var i = 0; i < names.length; i++) flat += names[i] + colours[names[i]];
+        var h = 5381;
+        for (var c = 0; c < flat.length; c++) h = ((h * 33) ^ flat.charCodeAt(c)) >>> 0;
+        return h.toString(36);
+    }
+
+    // Phases whose HTML we already pulled this session. A re-theme re-runs the
+    // extractor over the cached copy rather than fetching the page again.
+    property var _htmlSeen: ({})
+
     function getDiagrams(slug, phase, colours) {
         // The command goes through `sh -c`, so the slug is interpolated into a
         // quoted string. Catalog slugs are URL-safe by construction, but that
         // is the server's invariant, not ours.
         if (!slug || phase < 1 || !/^[A-Za-z0-9._-]+$/.test(slug)) return;
-        var key = slug + "/" + phase;
+        var fp = _themeKey(colours || ({}));
+        var key = slug + "/" + phase + "/" + fp;
         if (diagramCache[key]) { root.diagramsDone(slug, phase, diagramCache[key]); return; }
 
         _diagSlug = slug; _diagPhase = phase; _diagKey = key;
@@ -172,10 +188,23 @@ Item {
             var value = String(colours[name]);
             if (/^#[0-9A-Fa-f]{3,8}$/.test(value)) args += " --colour " + name + "=" + value;
         }
+        var stem = slug + "-" + phase;
+        var html = cacheDir + "/" + stem + ".html";
         var url = _url("/guides/" + encodeURIComponent(slug) + "/" + phase);
+        // Switching themes must not cost a round trip, so the page is teed on
+        // the first fetch and read back for every re-theme after it. The -s
+        // test matters: a failed first fetch leaves an empty file behind, and
+        // re-theming off that would show nothing forever.
+        var fetch = "mkdir -p '" + cacheDir + "' && curl -fsSL --max-time 20 '" + url
+            + "' | tee '" + html + "'";
+        var source = _htmlSeen[stem]
+            ? "if [ -s '" + html + "' ]; then cat '" + html + "'; else " + fetch + "; fi"
+            : fetch;
+        _htmlSeen[stem] = true;
         _run(diagramProc, ["sh", "-c",
-            "curl -fsSL --max-time 20 '" + url + "' | '" + _scriptPath("tmm-diagrams")
-            + "' '" + diagramDir + "' '" + slug + "-" + phase + "'" + args]);
+            source + " | '" + _scriptPath("tmm-diagrams")
+            + "' '" + diagramDir + "' '" + stem + "-" + fp + "'"
+            + " --prune '" + stem + "-'" + args]);
     }
 
     Process {

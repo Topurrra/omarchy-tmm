@@ -45,6 +45,7 @@ Item {
     // Bounds from the response headers; 0 means we do not know yet (an old
     // cached phase has no sidecar). Never guess -- an unknown bound lets the
     // request through, which is how this behaved before the headers existed.
+    property string _diagramsFor: ""
     property int phaseCount: 0
     property int nextPhaseNo: 0
     property string returnMode: "search"
@@ -396,8 +397,22 @@ Item {
         };
     }
 
+    // A binding, not a snapshot: it reads the same theme properties
+    // diagramColours() does, so switching Omarchy themes changes it by itself.
+    // Diagrams left in the old palette next to a repainted panel look broken.
+    readonly property string diagramTheme: JSON.stringify(diagramColours())
+
+    onDiagramThemeChanged: {
+        if (root.mode === "reader" && root.currentSlug && root.phaseBody)
+            root.fetchDiagrams(root.currentSlug, root.currentPhase, root.phaseBody);
+    }
+
     function fetchDiagrams(slug, phase, body) {
-        reader.diagrams = [];
+        // Keep what is on screen when only the theme changed: blanking the
+        // diagrams and redrawing them a moment later reads as a glitch.
+        var here = slug + "/" + phase;
+        if (here !== root._diagramsFor) reader.diagrams = [];
+        root._diagramsFor = here;
         var blocks = Markdown.parseBlocks(body);
         var wanted = 0;
         for (var i = 0; i < blocks.length; i++)
