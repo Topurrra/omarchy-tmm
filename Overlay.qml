@@ -234,6 +234,12 @@ Item {
             Quickshell.execDetached(["xdg-open", s.webUrl(root.currentSlug, root.currentPhase)]);
     }
 
+    function firstUnanswered() {
+        for (var i = 0; i < reader.quizCount; i++)
+            if (reader.quizChosen(i) < 0) return i;
+        return 0;
+    }
+
     function backFromReader() {
         root.mode = root.returnMode === "catalog" ? "catalog" : "search";
     }
@@ -369,6 +375,9 @@ Item {
             if (heading) root.guideTitle = heading;
             root.mode = "reader";
             root.errorMsg = "";
+            reader.quizActive = false;
+            reader.quizAnswers = [];
+            reader.quizCursor = 0;
             var s = root.svc();
             if (s && typeof s.rememberPhase === "function")
                 s.rememberPhase(slug, phase, root.guideTitle);
@@ -431,8 +440,11 @@ Item {
     }
 
     readonly property string keyHints: {
+        if (mode === "reader" && reader.quizActive)
+            return "a-d answer  ·  ↑↓ question  ·  r start over  ·  m retry missed  ·  ⎋ done";
         if (mode === "reader")
-            return "↑↓ scroll  ·  n/p phase  ·  y copy  ·  o browser  ·  ⎋ back";
+            return (reader.quizCount > 0 ? "q quiz  ·  " : "")
+                + "↑↓ scroll  ·  n/p phase  ·  y copy  ·  o browser  ·  ⎋ back";
         if (mode === "catalog")
             return catalogCategory
                 ? "type to filter  ·  ↑↓ move  ·  ⏎ read  ·  ⎋ categories  ·  ⇥ search"
@@ -790,6 +802,7 @@ Item {
         // Escape unwinds one layer at a time rather than dropping everything.
         if (event.key === Qt.Key_Escape) {
             if (root.errorMsg) root.errorMsg = "";
+            else if (root.mode === "reader" && reader.quizActive) reader.quizActive = false;
             else if (root.mode === "reader") root.backFromReader();
             else if (root.mode === "catalog" && root.catalogBack()) { /* went up a level */ }
             else if (root.mode === "catalog") root.mode = "search";
@@ -799,11 +812,46 @@ Item {
             return;
         }
 
-        if (root.mode === "reader") { root.handleReaderKey(event, ctrl); return; }
+        if (root.mode === "reader") {
+            // Quiz mode is a short-lived layer over the reader: it takes the
+            // keys it needs and lets everything else fall through, so n/p/y/o
+            // keep working while you answer.
+            if (reader.quizActive && root.handleQuizKey(event)) return;
+            root.handleReaderKey(event, ctrl, shift);
+            return;
+        }
         root.handleListKey(event, ctrl, shift);
     }
 
-    function handleReaderKey(event, ctrl) {
+    // Returns true when the quiz consumed the key.
+    function handleQuizKey(event) {
+        var text = (event.text || "").toLowerCase();
+
+        // a-d and 1-4 both answer; the card labels choices A-D like the site.
+        var choice = -1;
+        if (text.length === 1) {
+            var code = text.charCodeAt(0);
+            if (code >= 97 && code <= 106) choice = code - 97;        // a..j
+            else if (code >= 49 && code <= 57) choice = code - 49;    // 1..9
+        }
+        if (choice >= 0 && !(event.modifiers & Qt.ControlModifier)) {
+            reader.answerQuiz(reader.quizCursor, choice);
+            event.accepted = true;
+            return true;
+        }
+
+        switch (event.key) {
+        case Qt.Key_Down: case Qt.Key_J: reader.quizMove(1); break;
+        case Qt.Key_Up:   case Qt.Key_K: reader.quizMove(-1); break;
+        case Qt.Key_R: reader.quizStartOver(); break;
+        case Qt.Key_M: reader.quizRetryMissed(); break;
+        default: return false;
+        }
+        event.accepted = true;
+        return true;
+    }
+
+    function handleReaderKey(event, ctrl, shift) {
         var step = Style.space(60);
         switch (event.key) {
         case Qt.Key_Down:  case Qt.Key_J: reader.scrollBy(step); break;
@@ -820,7 +868,10 @@ Item {
         case Qt.Key_Backspace: root.backFromReader(); break;
         case Qt.Key_Slash: root.mode = "search"; root.setQuery(""); break;
         case Qt.Key_Tab: root.showCatalog(); break;
-        case Qt.Key_Q: root.dismiss(); break;
+        case Qt.Key_Q:
+            if (shift || reader.quizCount === 0) root.dismiss();
+            else { reader.quizActive = true; reader.quizCursor = root.firstUnanswered(); }
+            break;
         case Qt.Key_R: if (ctrl) root.pickRandom(); else return; break;
         default: return;
         }
