@@ -45,6 +45,25 @@ Then click the book glyph in the bar, or press `SUPER + ALT + M`, and start
 typing. If the bar button does not appear on its own:
 `omarchy bar put tmm.manual --section right`.
 
+## Updating
+
+```bash
+omarchy plugin update tmm.manual
+omarchy-restart-shell
+```
+
+That pulls the repo in place and keeps the plugin enabled, so nothing else needs
+redoing — `bin/tmm-diagrams` lives inside the plugin folder and comes with it.
+The restart matters: the shell holds the QML in memory, so an updated file does
+nothing until it reloads.
+
+Two things live outside the plugin folder and are only worth redoing when they
+change: `bin/tmm` in `~/.local/bin`, and the menu entries
+(`tmm-menu install && omarchy menu refresh`).
+
+Old caches are safe to drop if an update seems not to have taken:
+`rm -rf ~/.cache/tmm`.
+
 ## Requirements
 
 - `python3` — runs `bin/tmm-diagrams` (every rendered diagram) and `bin/tmm-menu`
