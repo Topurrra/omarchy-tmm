@@ -7,17 +7,17 @@ Omarchy reads exactly one user menu extension file:
 
 It is shared by everything you add to the menu, so copying a fragment over it
 destroys whatever else was there. This merges our entries in instead, and can
-take them back out again — which plain `rm` of the plugin cannot do, since the
-menu entry does not live in the plugin directory.
+take them back out again - which deleting the plugin cannot do, since the menu
+entry does not live in the plugin directory.
 
 Usage:
-    tmm-menu install [--fragment PATH]   add/refresh the Missing Manual entries
+    tmm-menu install [--fragment PATH]   add or refresh the Missing Manual entries
     tmm-menu remove                      take them out again
     tmm-menu status                      show what is currently in the file
 
-The file keeps its comments and formatting: only lines holding our own keys are
-touched. The result is parsed before it is saved, and the previous version is
-kept as <file>.bak.
+Only whole members whose key is ours are touched, so other plugins' entries and
+their comments survive byte for byte. The result is parsed before it is saved,
+and the previous version is kept as <file>.bak.
 """
 
 import argparse
@@ -31,12 +31,13 @@ MENU_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
     "omarchy", "extensions", "omarchy-menu.jsonc",
 )
-# Our keys: "tmm" and anything under it ("tmm.search", "tmm.catalog", ...).
-OURS = re.compile(r'^\s*"tmm(\.[A-Za-z0-9_-]+)?"\s*:')
+# Our keys: "tmm" and anything under it. Covers the older "tmm.guides" /
+# "tmm.cheat" names too, so an upgrade clears them out.
+OURS_KEY = re.compile(r"^tmm(\.[A-Za-z0-9_-]+)?$")
 
 
 def strip_jsonc(raw):
-    """Drop // comments and trailing commas so json can parse the result."""
+    """Drop // and /* */ comments and trailing commas so json can parse it."""
     out, in_string, escaped = [], False, False
     i = 0
     while i < len(raw):
@@ -66,8 +67,7 @@ def strip_jsonc(raw):
             continue
         out.append(ch)
         i += 1
-    text = "".join(out)
-    return re.sub(r",(\s*[}\]])", r"\1", text)
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
 
 
 def parse(raw):
@@ -81,34 +81,148 @@ def read_menu():
         return fh.read()
 
 
+# --- brace-aware editing --------------------------------------------------
+#
+# Menu entries are normally multi-line objects, so matching keys with a line
+# regex only ever deletes an entry's first line and orphans its body. These
+# walk the real structure and cut whole members instead.
+
+def _skip_ws(text, i):
+    n = len(text)
+    while i < n:
+        if text[i] in " \t\r\n":
+            i += 1
+        elif text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end == -1 else end + 2
+        else:
+            break
+    return i
+
+
+def _read_string(text, i):
+    """`i` is the opening quote. Returns (value, index past the closing quote)."""
+    n, out = len(text), []
+    i += 1
+    while i < n:
+        c = text[i]
+        if c == "\\":
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        if c == '"':
+            return "".join(out), i + 1
+        out.append(c)
+        i += 1
+    raise ValueError("unterminated string")
+
+
+def _skip_value(text, i):
+    """Skip one value, honouring nesting, strings and comments."""
+    n = len(text)
+    i = _skip_ws(text, i)
+    if i >= n:
+        return i
+    if text[i] == '"':
+        return _read_string(text, i)[1]
+    if text[i] in "{[":
+        depth = 0
+        while i < n:
+            c = text[i]
+            if c == '"':
+                i = _read_string(text, i)[1]
+                continue
+            if text.startswith("//", i) or text.startswith("/*", i):
+                i = _skip_ws(text, i)
+                continue
+            if c in "{[":
+                depth += 1
+            elif c in "}]":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            i += 1
+        raise ValueError("unbalanced braces")
+    while i < n and text[i] not in ",}\n":
+        i += 1
+    return i
+
+
+def members(text):
+    """Top-level members as (key, start, end); end covers a trailing comma."""
+    n = len(text)
+    i = text.find("{")
+    if i == -1:
+        raise ValueError("no opening brace")
+    i += 1
+    found = []
+    while i < n:
+        i = _skip_ws(text, i)
+        if i >= n or text[i] == "}":
+            break
+        if text[i] != '"':
+            i += 1
+            continue
+        start = i
+        key, i = _read_string(text, i)
+        i = _skip_ws(text, i)
+        if i < n and text[i] == ":":
+            i += 1
+        i = _skip_value(text, i)
+        j = _skip_ws(text, i)
+        if j < n and text[j] == ",":
+            i = j + 1
+        found.append((key, start, i))
+    return found
+
+
 def fragment_lines(path):
-    """Our entries from the repo fragment, as verbatim source lines."""
+    """Our entries from the repo fragment, as verbatim source text."""
     with open(path, encoding="utf-8") as fh:
         raw = fh.read()
     parse(raw)  # fail early if the fragment itself is broken
-    return [ln.rstrip() for ln in raw.split("\n") if OURS.match(ln)]
+    return [raw[s:e].strip().rstrip(",")
+            for key, s, e in members(raw) if OURS_KEY.match(key)]
 
 
-def without_ours(text):
-    kept = [ln for ln in text.split("\n") if not OURS.match(ln)]
-    return "\n".join(kept)
+def drop_ours(text):
+    """Remove whole members whose key is ours, wherever they sit."""
+    spans = [m for m in members(text) if OURS_KEY.match(m[0])]
+    for _key, start, end in sorted(spans, key=lambda m: -m[1]):
+        text = text[:start] + text[end:]
+    return text
 
 
-def splice(text, lines):
-    """Insert `lines` just before the closing brace, fixing up commas."""
-    idx = text.rstrip().rfind("}")
-    if idx == -1:
+def tidy(text):
+    """Collapse the blank run a deletion leaves, and any dangling comma."""
+    text = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", text)
+    close = text.rstrip().rfind("}")
+    if close == -1:
+        return text
+    return re.sub(r",(\s*)$", r"\1", text[:close]) + text[close:]
+
+
+def _indent(member):
+    """Two-space indent for a member, which may itself span lines."""
+    return "\n".join("  " + ln.strip() if ln.strip() else ""
+                     for ln in member.split("\n"))
+
+
+def splice(text, block):
+    """Insert `block` (whole members) just before the closing brace."""
+    text = tidy(text)
+    if not block:
+        return text
+    close = text.rstrip().rfind("}")
+    if close == -1:
         raise SystemExit("tmm-menu: %s has no closing brace; not touching it" % MENU_PATH)
-    head, tail = text[:idx].rstrip(), text[idx:]
-
-    body = head[1:].strip() if head.startswith("{") else head.strip()
-    block = "\n".join(lines).rstrip().rstrip(",")
-    if body:
-        body = body.rstrip().rstrip(",") + ",\n" + block
-    else:
-        body = block
-    indented = "\n".join("  " + ln.strip() if ln.strip() else "" for ln in body.split("\n"))
-    return "{\n" + indented + "\n" + tail.lstrip()
+    head, tail = text[:close].rstrip(), text[close:]
+    if members(text):
+        head = head.rstrip().rstrip(",") + ","
+    return head + "\n" + ",\n".join(_indent(m) for m in block) + "\n" + tail.lstrip()
 
 
 def save(text, quiet=False):
@@ -119,9 +233,10 @@ def save(text, quiet=False):
     with open(MENU_PATH, "w", encoding="utf-8") as fh:
         fh.write(text if text.endswith("\n") else text + "\n")
     if not quiet:
-        others = [k for k in parsed if not k.startswith("tmm")]
+        ours = [k for k in parsed if OURS_KEY.match(k)]
+        others = [k for k in parsed if not OURS_KEY.match(k)]
         print("wrote %s" % MENU_PATH)
-        print("  ours:  %s" % (", ".join(k for k in parsed if k.startswith("tmm")) or "none"))
+        print("  ours:  %s" % (", ".join(ours) or "none"))
         print("  other: %s" % (", ".join(others) or "none"))
         print("Run: omarchy menu refresh")
 
@@ -130,7 +245,8 @@ def main():
     ap = argparse.ArgumentParser(prog="tmm-menu", add_help=True)
     ap.add_argument("action", choices=["install", "remove", "status"])
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ap.add_argument("--fragment", default=os.path.join(here, "extensions", "omarchy-menu.jsonc"))
+    ap.add_argument("--fragment",
+                    default=os.path.join(here, "extensions", "omarchy-menu.jsonc"))
     args = ap.parse_args()
 
     current = read_menu()
@@ -144,8 +260,8 @@ def main():
         except ValueError as exc:
             raise SystemExit("tmm-menu: %s is not valid JSONC: %s" % (MENU_PATH, exc))
         print(MENU_PATH)
-        for k in keys:
-            print("  %-16s %s" % (k, "(ours)" if k.startswith("tmm") else ""))
+        for key in keys:
+            print("  %-16s %s" % (key, "(ours)" if OURS_KEY.match(key) else ""))
         return
 
     try:
@@ -154,13 +270,12 @@ def main():
         raise SystemExit("tmm-menu: %s is not valid JSONC, fix it first: %s" % (MENU_PATH, exc))
 
     if args.action == "remove":
-        save(splice(without_ours(current), []) if without_ours(current).strip() not in ("{", "{}", "{\n}")
-             else "{\n}\n")
+        save(tidy(drop_ours(current)))
         return
 
     if not os.path.exists(args.fragment):
         raise SystemExit("tmm-menu: fragment not found: %s" % args.fragment)
-    save(splice(without_ours(current), fragment_lines(args.fragment)))
+    save(splice(drop_ours(current), fragment_lines(args.fragment)))
 
 
 if __name__ == "__main__":
