@@ -35,6 +35,7 @@ Switch themes and the reader repaints with the desktop.
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
 - **Catalog browser** with instant local filtering (the catalog is fetched once per session)
 - **Offline fallback** — a phase you have read before still opens with no network, and says so
+- **A bar button** — a book glyph in the Omarchy bar that toggles the overlay, so there is always something to click
 - **A CLI that matches** — `tmm read` renders the same markdown with ANSI styling
 
 ## Requirements
@@ -57,35 +58,62 @@ omarchy plugin add https://github.com/Topurrra/omarchy-tmm --enable
 omarchy-shell shell rescanPlugins
 ```
 
+Plugins are unsandboxed code, so Omarchy installs them **disabled** unless you
+pass `--enable`, and waits for you to review them. If you leave the flag off —
+or install by hand, as in Option B — finish with `omarchy plugin enable
+tmm.manual`. A disabled plugin answers a summon by doing nothing at all, which
+looks exactly like a broken install.
+
 ### Option B: manual install
 
-Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings.
+Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings, and `BarWidget.qml` is the bar button.
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/tmm.manual
-cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml Model.js Markdown.js logo.png \
+cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml BarWidget.qml \
+   Model.js Markdown.js logo.png \
    ~/.config/omarchy/plugins/tmm.manual/
 cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm
 omarchy-shell shell rescanPlugins
+omarchy plugin enable tmm.manual        # copied plugins start disabled
 ```
 
 ### Option C: menu + keybindings (recommended)
 
 ```bash
-# Menu entries
-mkdir -p ~/.config/omarchy/extensions
-cp extensions/omarchy-menu.jsonc ~/.config/omarchy/extensions/omarchy-menu.jsonc
+# Menu entries. Use the helper, do NOT copy the fragment over the file:
+# Omarchy reads one shared user menu file, so a plain `cp` would wipe every
+# other entry in it.
+cp bin/tmm-menu ~/.local/bin/tmm-menu && chmod +x ~/.local/bin/tmm-menu
+./bin/tmm-menu install
 omarchy menu refresh
 
 # Keybindings
 cat bindings.lua.fragment >> ~/.config/hypr/bindings.lua
 ```
 
+`tmm-menu status` shows what is in that file, `tmm-menu remove` takes our
+entries back out, and every write keeps a `.bak` beside the original.
+
 See [INSTALL.md](INSTALL.md) for the short checklist and troubleshooting.
 
 ## Usage
 
-Open it with `SUPER + ALT + M`, or from a terminal:
+There are three ways in, and all of them go through the same shell IPC:
+
+1. **The bar button** — a book glyph, added to the right of the bar when the
+   plugin is enabled. Click it to toggle the overlay.
+2. **`SUPER + ALT + M`** — requires `bindings.lua.fragment` to be appended to
+   `~/.config/hypr/bindings.lua`.
+3. **The menu** — *Missing Manual*, from `extensions/omarchy-menu.jsonc`.
+
+If the bar button is not there after enabling the plugin, place it by hand:
+
+```bash
+omarchy bar put tmm.manual --section right
+```
+
+Or from a terminal:
 
 ```bash
 omarchy-shell shell toggle tmm.manual
@@ -180,6 +208,7 @@ Repo layout:
 ```
 manifest.json                  # id tmm.manual, kinds overlay + service
 Overlay.qml                    # layer-shell overlay: search / reader / catalog
+BarWidget.qml                  # bar button that toggles the overlay
 Reader.qml                     # markdown blocks drawn as themed QML
 ResultList.qml                 # keyboard-first list, shared by search and catalog
 Service.qml                    # headless API client, cache, recents, signals
@@ -187,6 +216,7 @@ Markdown.js                    # markdown -> blocks + inline rich text
 logo.png                       # brand mark, shown in the header and on welcome
 Model.js                       # URL builders, catalog parsing, phase nav
 bin/tmm                        # terminal client with the same renderer
+bin/tmm-menu                   # merges/removes our entries in the shared menu file
 extensions/omarchy-menu.jsonc  # menu fragment
 bindings.lua.fragment          # Hyprland keybind fragment
 ```
@@ -205,9 +235,46 @@ omarchy-shell shell rescanPlugins
 
 - **Empty results**: check the network, then broaden the query. The API returns a `suggestion`, shown as "Did you mean".
 - **Stale page**: delete `~/.cache/tmm/<slug>-<phase>.md` and reopen.
-- **Overlay does not appear**: validate the manifest, rescan plugins, and check that `shell.json` lists `tmm.manual` under `plugins`.
+- **Overlay does not appear.** Work through these in order:
+
+  ```bash
+  # 1. Is it discovered, and is it enabled? (enabled:false is the usual answer)
+  omarchy-shell shell listPlugins | python3 -m json.tool | grep -A4 tmm.manual
+
+  # 2. Enable it
+  omarchy plugin enable tmm.manual
+  # or, equivalently:
+  omarchy-shell shell setPluginEnabled tmm.manual true
+
+  # 3. Are all the files there? Overlay.qml needs its siblings
+  ls ~/.config/omarchy/plugins/tmm.manual/
+  # expect: manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml
+  #         Model.js Markdown.js logo.png
+
+  # 4. Reload the code and try it directly
+  omarchy-shell shell rescanPlugins
+  omarchy-shell shell summon tmm.manual
+  ```
+
+  `summon` answers `ok` on success; `unknown` means the shell has no such
+  plugin loaded, which sends you back to steps 1–3.
+
+  **`ok` but still nothing on screen?** Then the plugin loaded and a QML error
+  stopped it drawing. `omarchy-launch-shell` runs Quickshell under
+  `systemd-cat -t omarchy-shell`, so the error is in the journal:
+
+  ```bash
+  journalctl -t omarchy-shell -n 100 --no-pager | grep -i -A3 'tmm\|error\|warning'
+
+  # watch it live while you summon from another terminal
+  journalctl -t omarchy-shell -f
+  ```
+
+  `rescanPlugins` hot-reloads plugin code, but after editing files a full
+  restart is the honest reset: `omarchy-restart-shell`.
 - **Overlay appears unstyled**: you are on an Omarchy build without `qs.Commons` / `qs.Ui`; this plugin targets v4 Quattro.
 - **Copy does nothing**: install `wl-copy` (`wl-clipboard`).
+- **Menu rows show words like `search` instead of icons**: you have an old copy of `extensions/omarchy-menu.jsonc`. The menu draws `icon` literally, so it must be a Nerd Font glyph. Re-copy the fragment and run `omarchy menu refresh`.
 - **Broken image in the header**: `logo.png` did not get copied next to `Overlay.qml`.
 - **No `python3`**: the CLI prints raw JSON and unrendered markdown. That is the intended fallback.
 
@@ -218,6 +285,22 @@ Issues and PRs welcome. Take colors, spacing and type from `Color` / `Style` rat
 Keep a QML file to one job and split it when it grows a second one — that is what `Reader.qml` and `ResultList.qml` are. `Overlay.qml` is deliberately the largest file: it owns the window, the three modes and the key map, which are hard to separate without making the flow harder to follow. (An earlier version of this note asked for ~300 lines per file; that was never true of the shell's own plugins either.)
 
 Content bugs (a wrong command in a guide) belong upstream in The Missing Manual repo, not here.
+
+## Uninstall
+
+The plugin scatters a few things outside its own directory, and deleting the
+plugin folder leaves the rest behind — most visibly the menu entry, which lives
+in Omarchy's shared menu file and will keep showing up until it is removed.
+
+```bash
+tmm-menu remove && omarchy menu refresh     # menu entries
+omarchy plugin remove tmm.manual            # the plugin itself
+rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
+rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json
+```
+
+Then drop the `Missing Manual` lines from `~/.config/hypr/bindings.lua` and run
+`hyprctl reload`.
 
 ## License
 
