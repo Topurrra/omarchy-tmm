@@ -24,7 +24,13 @@
    summoned, which looks exactly like a broken install.
 
 4. CLI: `cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm`
-5. Menu fragment: `cp extensions/omarchy-menu.jsonc ~/.config/omarchy/extensions/omarchy-menu.jsonc`
+5. Menu entries: `cp bin/tmm-menu ~/.local/bin/ && chmod +x ~/.local/bin/tmm-menu && tmm-menu install`
+
+   Do **not** `cp` the fragment over `~/.config/omarchy/extensions/omarchy-menu.jsonc`.
+   Omarchy reads that one file for every user menu entry, so copying over it
+   deletes anything else you have added. `tmm-menu` merges instead, keeps a
+   `.bak`, and refuses to write anything that would not parse.
+
 6. Refresh the menu: `omarchy menu refresh`
 7. Keybinds: append `bindings.lua.fragment` to `~/.config/hypr/bindings.lua`
 
@@ -61,3 +67,17 @@ typing. If the bar button does not appear on its own:
 - No `python3`/`jq`: raw JSON output is the expected fallback.
 - Caches: phase markdown in `~/.cache/tmm/`, recents in
   `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.
+- Menu entry still there after deleting the plugin? It lives in Omarchy's
+  shared menu file, not in the plugin folder: `tmm-menu remove && omarchy menu
+  refresh`. `tmm-menu status` lists what that file currently holds.
+
+## Uninstall
+
+```bash
+tmm-menu remove && omarchy menu refresh
+omarchy plugin remove tmm.manual
+rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
+rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json
+```
+
+Then remove the `Missing Manual` lines from `~/.config/hypr/bindings.lua`.

@@ -81,14 +81,19 @@ omarchy plugin enable tmm.manual        # copied plugins start disabled
 ### Option C: menu + keybindings (recommended)
 
 ```bash
-# Menu entries
-mkdir -p ~/.config/omarchy/extensions
-cp extensions/omarchy-menu.jsonc ~/.config/omarchy/extensions/omarchy-menu.jsonc
+# Menu entries. Use the helper, do NOT copy the fragment over the file:
+# Omarchy reads one shared user menu file, so a plain `cp` would wipe every
+# other entry in it.
+cp bin/tmm-menu ~/.local/bin/tmm-menu && chmod +x ~/.local/bin/tmm-menu
+./bin/tmm-menu install
 omarchy menu refresh
 
 # Keybindings
 cat bindings.lua.fragment >> ~/.config/hypr/bindings.lua
 ```
+
+`tmm-menu status` shows what is in that file, `tmm-menu remove` takes our
+entries back out, and every write keeps a `.bak` beside the original.
 
 See [INSTALL.md](INSTALL.md) for the short checklist and troubleshooting.
 
@@ -211,6 +216,7 @@ Markdown.js                    # markdown -> blocks + inline rich text
 logo.png                       # brand mark, shown in the header and on welcome
 Model.js                       # URL builders, catalog parsing, phase nav
 bin/tmm                        # terminal client with the same renderer
+bin/tmm-menu                   # merges/removes our entries in the shared menu file
 extensions/omarchy-menu.jsonc  # menu fragment
 bindings.lua.fragment          # Hyprland keybind fragment
 ```
@@ -279,6 +285,22 @@ Issues and PRs welcome. Take colors, spacing and type from `Color` / `Style` rat
 Keep a QML file to one job and split it when it grows a second one — that is what `Reader.qml` and `ResultList.qml` are. `Overlay.qml` is deliberately the largest file: it owns the window, the three modes and the key map, which are hard to separate without making the flow harder to follow. (An earlier version of this note asked for ~300 lines per file; that was never true of the shell's own plugins either.)
 
 Content bugs (a wrong command in a guide) belong upstream in The Missing Manual repo, not here.
+
+## Uninstall
+
+The plugin scatters a few things outside its own directory, and deleting the
+plugin folder leaves the rest behind — most visibly the menu entry, which lives
+in Omarchy's shared menu file and will keep showing up until it is removed.
+
+```bash
+tmm-menu remove && omarchy menu refresh     # menu entries
+omarchy plugin remove tmm.manual            # the plugin itself
+rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
+rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json
+```
+
+Then drop the `Missing Manual` lines from `~/.config/hypr/bindings.lua` and run
+`hyprctl reload`.
 
 ## License
 
