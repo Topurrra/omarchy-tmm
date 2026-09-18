@@ -34,9 +34,9 @@ Switch themes and the reader repaints with the desktop.
 - **Diagrams, drawn in your theme** — the site bakes every mermaid diagram to SVG with placeholder colours its CSS remaps; the plugin makes the same substitution against your Omarchy palette, so a flowchart matches the desktop around it
 - **Keyboard-first throughout** — arrows, `Enter`, `Tab`, `n`/`p`, `g`/`G`; the mouse is optional everywhere
 - **Ask the guides** — press `?` and get an answer written from the manual itself, with the phases it came from listed underneath; press `1`–`9` to open one. Answers are cached locally, so asking the same thing twice is free and instant
-- **Recents** on the empty search screen, shared between the overlay and the CLI, so "where was I" is one keystroke
+- **Recents** on the empty search screen (`⇥` from home), shared between the overlay and the CLI, so "where was I" is one keystroke
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
-- **Catalog browser by category** — `Tab` opens the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
+- **Home is the catalog** — the overlay opens on the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
 - **Offline fallback** — a phase you have read before still opens with no network, and says so
 - **A bar button** — a book glyph in the Omarchy bar that toggles the overlay, so there is always something to click
 - **A CLI that matches** — `tmm read` renders the same markdown with ANSI styling
@@ -69,17 +69,26 @@ looks exactly like a broken install.
 
 ### Option B: manual install
 
-Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`, `Markdown.js` and the logo as siblings, and `BarWidget.qml` is the bar button.
+Copy every QML and JS file plus `logo.png` — the overlay loads `Reader.qml`, `ResultList.qml`,
+`Markdown.js` and the logo as siblings, `BarWidget.qml` is the bar button, and the service runs
+`bin/tmm-diagrams` from the plugin folder.
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/tmm.manual
 cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml BarWidget.qml \
    Model.js Markdown.js logo.png \
    ~/.config/omarchy/plugins/tmm.manual/
-cp bin/tmm ~/.local/bin/tmm && chmod +x ~/.local/bin/tmm
+cp -r bin ~/.config/omarchy/plugins/tmm.manual/
+chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
+mkdir -p ~/.local/bin
+cp bin/tmm bin/tmm-menu ~/.local/bin/ && chmod +x ~/.local/bin/tmm ~/.local/bin/tmm-menu
 omarchy-shell shell rescanPlugins
 omarchy plugin enable tmm.manual        # copied plugins start disabled
 ```
+
+Leave `bin/` out and the plugin still works, but every diagram stays a
+`Diagram · mermaid` card and nothing says why — a missing helper is not an
+error the reader can show you.
 
 ### Option C: menu + keybindings (recommended)
 
@@ -197,7 +206,7 @@ what they do in the reader.
 
 **Catalog**
 
-Two levels: the category list, then the guides inside one.
+The overlay opens here. Two levels: the category list, then the guides inside one.
 
 | Key | Action |
 |-----|--------|
@@ -206,7 +215,7 @@ Two levels: the category list, then the guides inside one.
 | `Enter` | Open the category, then open the guide |
 | `Backspace` (empty filter) | Back up to the categories |
 | `Tab` | Back to search |
-| `Esc` | Clear the filter, then back up a level, then close |
+| `Esc` | Clear the filter, then back up a level, then back to search |
 
 ### CLI
 
