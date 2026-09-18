@@ -135,11 +135,13 @@ Item {
             root.mode = "search";
             root.setQuery(q);
         } else {
-            root.mode = "search";
+            // Home is the catalog: 27 categories, no network needed beyond
+            // the one fetch. Clearing a search still shows recents, so
+            // "where was I" stays one keystroke away.
             root.query = "";
             resultsModel.clear();
             root.suggestion = "";
-            root.showRecents();
+            root.showCatalog();
         }
         // Warm the catalog so Tab is instant and the placeholder can be honest
         // about how many guides there are.
@@ -459,6 +461,13 @@ Item {
         catalogList.cursorActive = catalogModel.count > 0;
     }
 
+    // Back to search from the catalog (Tab, Esc). An empty query shows
+    // recents, so the history from the old home screen is still here.
+    function backToSearch() {
+        root.mode = "search";
+        if (!root.query) root.showRecents();
+    }
+
     // Up one level; returns false when already at the top.
     function catalogBack() {
         if (root.catalogFilter) { root.setCatalogFilter(""); return true; }
@@ -750,7 +759,7 @@ Item {
         if (mode === "catalog")
             return catalogCategory
                 ? "type to filter  ·  ↑↓ move  ·  ⏎ read  ·  ⎋ categories  ·  ⇥ search"
-                : "type to filter  ·  ↑↓ move  ·  ⏎ open category  ·  ⇥ search  ·  ⎋ close";
+                : "type to filter  ·  ↑↓ move  ·  ⏎ open category  ·  ⇥ search  ·  ⎋ search";
         return "type to search  ·  ↑↓ move  ·  ⏎ open"
             + (root.canAsk() ? "  ·  ? ask" : "")
             + "  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
@@ -1112,7 +1121,7 @@ Item {
         if (mode === "catalog") return catalogFilter
             ? "Backspace to widen the filter, or ⇥ to search instead."
             : catalogCategory ? "Press ⎋ to go back to the categories."
-            : "Press ⇥ to go back to search.";
+            : "Pick a category, type to filter it, or ⇥ to search instead.";
         if (searchDebounce.running || (s && s.searching)) return "";
         if (query) {
             if (root.suggestion) return "Try the suggestion above, or a broader word.";
@@ -1140,7 +1149,7 @@ Item {
             else if (root.mode === "reader" && reader.quizActive) reader.quizActive = false;
             else if (root.mode === "reader") root.backFromReader();
             else if (root.mode === "catalog" && root.catalogBack()) { /* went up a level */ }
-            else if (root.mode === "catalog") root.mode = "search";
+            else if (root.mode === "catalog") root.backToSearch();
             else if (root.query) root.setQuery("");
             else root.dismiss();
             event.accepted = true;
@@ -1276,7 +1285,7 @@ Item {
 
         switch (event.key) {
         case Qt.Key_Tab:
-            if (isCatalog) root.mode = "search"; else root.showCatalog();
+            if (isCatalog) root.backToSearch(); else root.showCatalog();
             event.accepted = true; return;
         case Qt.Key_Down: list.moveCursor(1); event.accepted = true; return;
         case Qt.Key_Up:   list.moveCursor(-1); event.accepted = true; return;
