@@ -41,7 +41,8 @@ The layout is responsive to the window's own width, not the monitor's:
   catalog list on the left, the reader on the right, so you keep browsing
   while you read. Press `s` to tuck the left column away for a full-width
   reading column, and again to bring it back (only does anything in this
-  wide layout).
+  wide layout). **Drag either column divider** to resize the list or the
+  chat dock; the reader reflows between them and the widths are remembered.
 
 ## Features
 
@@ -50,9 +51,9 @@ The layout is responsive to the window's own width, not the monitor's:
 - **Quizzes you can actually answer** — the `Check your understanding` block at the end of a phase is a real quiz: a choice locks on first answer, a wrong one gets the diagnosis written for that specific distractor, and you can retry just the ones you missed
 - **Diagrams, rendered inline, in your theme** — mermaid diagrams are rasterised and drawn right in the reader, re-themed to match your palette (falls back to a `Diagram · mermaid` card if `rsvg-convert` isn't available)
 - **Keyboard-first throughout** — arrows, `Enter`, `Tab`, `n`/`p`, `g`/`G`, `Ctrl+T` to cycle the reading theme, `s` to fold the sidebar in wide mode; the mouse is optional everywhere
-- **Responsive layout** — a single column below ~900px window width, two columns (list + reader side by side) at or above it, so you can keep browsing while you read
+- **Responsive layout** — a single column below ~900px window width, two columns (list + reader side by side) at or above it, so you can keep browsing while you read; drag either column divider to resize the list or the chat dock, and the widths are remembered between sessions
 - **Ask the guides** — press `?` and get an answer written from the manual itself, with the phases it came from listed underneath; press `1`–`9` to open one. Answers are cached locally, so asking the same thing twice is free and instant
-- **AI study chat** — press `Ctrl+K` for a dock beside the reader that answers questions grounded in the guide you're on. It's bring-your-own-key: point it at your own LLM for real conversational answers, or leave it unconfigured and it still works as a retrieval helper — relevant sections plus clickable source chips
+- **AI study chat** — press `Ctrl+K` for a dock beside the reader that answers questions grounded in the guide you're on. It's bring-your-own-key: point it at your own LLM (or a Claude/ChatGPT/Cursor subscription) for real conversational answers, or leave it unconfigured and it still works as a retrieval helper — relevant sections plus clickable source chips. Configure it from a built-in settings form (the gear, or `Ctrl+,`) — no file editing needed
 - **Recents** on the empty search screen (`⇥` from home), shared between the window and the CLI, so "where was I" is one keystroke
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
 - **Home is the catalog** — the window opens on the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
@@ -287,12 +288,44 @@ you pay your own provider (or run a local model for free, offline), and your
 key never leaves your machine — it's only ever sent to the endpoint you
 configured.
 
+Already have a **Claude, ChatGPT, or Cursor subscription** and don't want a
+metered API key? Point the chat at that tool's local CLI and answers run on your
+subscription — no key, no per-token cost:
+
+- `"provider": "claude-cli"` — Claude Code (`claude`)
+- `"provider": "codex"` — OpenAI Codex (`codex`, on your ChatGPT plan)
+- `"provider": "cursor"` — Cursor Agent (`cursor-agent`)
+- `"provider": "opencode"` — [opencode](https://opencode.ai) (`opencode`)
+
+Each runs its CLI in a read-only, no-edit mode inside a scratch directory, so the
+chat can only ever return text — it never touches your files. It's a little
+slower (each reply spins the agent up) and needs that CLI installed, on your
+`PATH`, and signed in.
+
+Studying doesn't need a frontier model — set a `model` (and, where supported, an
+`effort`) to a cheaper, faster one so you're not burning tokens on it.
+
 ### Turning it on
 
-Create `~/.config/tmm/ai.json`. It hot-reloads, so there's no need to restart
-the plugin or the shell after editing it.
+The easiest way is the built-in **settings form** — no file editing. Open the
+chat (`Ctrl+K`), then click the gear in its header or press `Ctrl+,`. Pick a
+provider, fill in the fields it shows for it (model and effort, plus a command
+for the subscription CLIs, or a base URL / API key for a hosted endpoint),
+optionally override the system prompt, and press **Save** (or `Ctrl+S`). It
+writes the same `~/.config/tmm/ai.json` described below and takes effect at once.
+
+Prefer to edit the file yourself? Create `~/.config/tmm/ai.json`. It hot-reloads,
+so there's no need to restart the plugin or the shell after editing it.
 
 ```jsonc
+// Subscription-backed local CLIs — no API key, no per-token cost
+{ "provider": "claude-cli" }   // Claude Code (claude)
+{ "provider": "codex" }        // OpenAI Codex (codex, your ChatGPT plan)
+{ "provider": "cursor" }       // Cursor Agent (cursor-agent)
+{ "provider": "opencode" }     // opencode
+// Pick a specific (cheaper) model / effort where the CLI or API supports it
+{ "provider": "codex", "model": "gpt-5-mini", "effort": "low" }
+{ "provider": "opencode", "model": "anthropic/claude-haiku-4-5" }
 // Local & free, via Ollama — no real key needed
 { "provider": "openai", "baseUrl": "http://localhost:11434/v1", "apiKey": "ollama", "model": "llama3.1" }
 // OpenAI
@@ -307,11 +340,13 @@ Fields:
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `provider` | yes | `"openai"` (any OpenAI-compatible endpoint — OpenAI, OpenRouter, Groq, or a local Ollama/LM Studio server) or `"anthropic"` (Anthropic's native Messages API) |
+| `provider` | yes | `"claude-cli"` / `"codex"` / `"cursor"` / `"opencode"` (a local agent CLI on your own subscription — no key), `"openai"` (any OpenAI-compatible endpoint — OpenAI, OpenRouter, Groq, or a local Ollama/LM Studio server), or `"anthropic"` (Anthropic's native Messages API) |
 | `baseUrl` | for `openai` | The endpoint to call |
-| `apiKey` | yes | Can also come from the `TMM_AI_KEY` environment variable instead of the file |
-| `model` | yes | Model id/name as your provider expects it |
-| `maxTokens` | no | Defaults to 1024 |
+| `apiKey` | for `openai`/`anthropic` | Can also come from the `TMM_AI_KEY` environment variable instead of the file |
+| `model` | for `openai`/`anthropic` | Model id/name as your provider expects it (optional for the CLI providers, where it maps to that CLI's `--model`) |
+| `bin` | no | CLI providers only — full path to the CLI binary if it isn't on the shell's `PATH` (defaults: `claude` / `codex` / `cursor-agent`) |
+| `maxTokens` | no | Defaults to 1024 (ignored by the CLI providers) |
+| `effort` | no | Reasoning effort, e.g. `"low"` / `"medium"` / `"high"`. Applied where supported: `openai`/`anthropic` (request), `codex` (`-c model_reasoning_effort`); for `cursor`/`claude-cli` put it in the model string (e.g. `"model": "sonnet[effort=low]"`) |
 | `systemPrompt` | no | Overrides the default system prompt (see below) |
 
 ### No key? Retrieval mode
@@ -325,7 +360,9 @@ real conversational AI with nothing else to change.
 ### Keys
 
 - `Ctrl+K` — open/close the chat dock, from any mode
+- `Ctrl+,` — open the AI settings form (or the gear in the dock header)
 - `Enter` — send · `Shift+Enter` — newline · `Esc` — close the dock
+- In settings: `Ctrl+S` / `Ctrl+Enter` — save · `Esc` — cancel
 
 ### The system prompt
 
@@ -372,7 +409,7 @@ bindings.lua.fragment          # Hyprland keybind fragment
 ```
 
 Phase markdown is cached in `~/.cache/tmm/` as `<slug>-<phase>.md`, themed diagram SVGs
-in `~/.cache/tmm/diagrams/` and answers in `~/.cache/tmm/ask/`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` and are shared by the window and the CLI.
+in `~/.cache/tmm/diagrams/` and answers in `~/.cache/tmm/ask/`; if a fetch fails the service falls back to that copy and the header says `offline`. Recents live in `~/.local/state/omarchy/tmm-recents.json` (shared by the window and the CLI), and dragged sidebar widths in `~/.local/state/omarchy/tmm-ui.json`.
 
 ## Troubleshooting
 
@@ -448,7 +485,7 @@ in Omarchy's shared menu file and will keep showing up until it is removed.
 tmm-menu remove && omarchy menu refresh     # menu entries
 omarchy plugin remove tmm.manual            # the plugin itself
 rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
-rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json
+rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json ~/.local/state/omarchy/tmm-ui.json
 ```
 
 Then drop the `Missing Manual` lines from `~/.config/hypr/bindings.lua` and run

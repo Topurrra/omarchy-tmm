@@ -388,7 +388,14 @@ Item {
         return (root.aiConfig && root.aiConfig.apiKey) || Quickshell.env("TMM_AI_KEY") || "";
     }
 
-    readonly property bool aiReady: !!(_aiKey() && aiConfig.model && aiConfig.provider)
+    // The CLI providers are subscription-backed (a local agent CLI you already
+    // signed into), so they need no API key -- just the binary. Everything else
+    // needs a key.
+    function _isCliProvider(p) {
+        return p === "claude-cli" || p === "codex" || p === "cursor" || p === "opencode";
+    }
+    readonly property bool aiReady: _isCliProvider(aiConfig.provider)
+        ? true : !!(_aiKey() && aiConfig.model && aiConfig.provider)
 
     FileView {
         id: aiConfigFile
@@ -397,6 +404,34 @@ Item {
         printErrors: false
         onLoaded: root._parseAiConfig(text())
         onLoadFailed: root.aiConfig = ({})
+        // watchChanges only fires this signal; it does not reload on its own.
+        // Reloading here is what makes ai.json hot-reload -- an external edit or
+        // a write from the settings form both land in aiConfig without a restart.
+        onFileChanged: aiConfigFile.reload()
+    }
+
+    readonly property string aiConfigPath: aiConfigFile.path
+    signal aiConfigSaved()
+    signal aiConfigSaveError(string msg)
+
+    // Write ai.json from the settings form. The JSON is pretty-printed and
+    // passed as an argv word ($0) -- never interpolated into the shell -- so a
+    // key or a system prompt with any characters in it can never break out.
+    // The watching FileView above reloads aiConfig on its own once written.
+    function saveAiConfig(obj) {
+        var json;
+        try { json = JSON.stringify(obj || ({}), null, 2) + "\n"; }
+        catch (e) { root.aiConfigSaveError("Could not encode the settings."); return; }
+        var cmd = "d=$(dirname \"$1\"); mkdir -p \"$d\" && printf '%s' \"$0\" > \"$1\"";
+        _run(aiWriteProc, ["sh", "-c", cmd, json, aiConfigFile.path]);
+    }
+
+    Process {
+        id: aiWriteProc
+        onExited: code => {
+            if (code === 0) root.aiConfigSaved();
+            else root.aiConfigSaveError("Could not write " + aiConfigFile.path + ".");
+        }
     }
 
     // provider-agnostic. `system` is a string; `messages` a JS array of
@@ -407,16 +442,69 @@ Item {
         var key = _aiKey();
         var provider = String(cfg.provider || "");
         var model = String(cfg.model || "");
+        var effort = String(cfg.effort || "");
         var maxTokens = Number(cfg.maxTokens) > 0 ? Number(cfg.maxTokens) : 1024;
         var msgs = Array.isArray(messages) ? messages : [];
         var argv, body, url;
 
+        if (_isCliProvider(provider)) {
+            // Subscription-backed: pipe the whole conversation to a local agent
+            // CLI (Claude Code / OpenAI Codex / Cursor / opencode) in its
+            // read-only, no-edit mode, run in an empty scratch dir, so the chat
+            // can only ever produce text -- it can't touch the machine. The
+            // prompt goes in on stdin as $0 (never interpolated); model is $1
+            // and effort $2 (each provider uses whichever flags it supports).
+            var bin = String(cfg.bin || (provider === "codex" ? "codex"
+                : provider === "cursor" ? "cursor-agent"
+                : provider === "opencode" ? "opencode" : "claude"));
+            var blob = String(system || "") + "\n\n";
+            for (var mi = 0; mi < msgs.length; mi++) {
+                blob += (msgs[mi].role === "assistant" ? "ASSISTANT: " : "USER: ")
+                    + String(msgs[mi].content || "") + "\n\n";
+            }
+            blob += "ASSISTANT:";
+
+            var scratch = cacheDir + "/ai-scratch";
+            var pre = "mkdir -p '" + scratch + "' 2>/dev/null; cd '" + scratch + "' 2>/dev/null; ";
+            var mopt = model ? " " + (provider === "opencode" ? "-m" : "--model") + " \"$1\"" : "";
+            var cliCmd;
+            if (provider === "codex") {
+                // Clean final answer is written to a file, then catted to stdout;
+                // the agent's own reasoning/exec chatter goes to /dev/null.
+                var eopt = effort ? " -c model_reasoning_effort=\"$2\"" : "";
+                cliCmd = pre + "F=\"" + scratch + "/codex.out\"; rm -f \"$F\"; "
+                    + "printf '%s' \"$0\" | timeout 150 '" + bin
+                    + "' exec --sandbox read-only --skip-git-repo-check" + mopt + eopt
+                    + " --output-last-message \"$F\" - >/dev/null 2>&1; "
+                    + "cat \"$F\" 2>/dev/null; rm -f \"$F\"";
+            } else if (provider === "cursor") {
+                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                    + "' -p --output-format text --mode ask --trust" + mopt + " 2>/dev/null";
+            } else if (provider === "opencode") {
+                // opencode streams JSONL; a tiny helper pulls out the answer text.
+                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                    + "' run --format json" + mopt + " 2>/dev/null | '"
+                    + _scriptPath("tmm-cli-extract") + "'";
+            } else { // claude-cli
+                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                    + "' -p --output-format text" + mopt
+                    + " --disallowed-tools Bash Read Write Edit MultiEdit NotebookEdit "
+                    + "WebFetch WebSearch Glob Grep Task TodoWrite";
+            }
+            root._chatProvider = "cli";
+            root.chatting = true;
+            _run(chatProc, ["sh", "-c", cliCmd, blob, model, effort]);
+            return;
+        }
+
         if (provider === "anthropic") {
             url = (cfg.baseUrl || "https://api.anthropic.com") + "/v1/messages";
-            body = JSON.stringify({
+            var abody = {
                 "model": model, "max_tokens": maxTokens,
                 "system": String(system || ""), "messages": msgs
-            });
+            };
+            if (effort) abody.output_config = { "effort": effort };
+            body = JSON.stringify(abody);
             argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
                 "-H", "x-api-key: " + key,
                 "-H", "anthropic-version: 2023-06-01",
@@ -432,7 +520,9 @@ Item {
             }
             url = /\/chat\/completions$/.test(base) ? base : base.replace(/\/$/, "") + "/chat/completions";
             var full = [{ "role": "system", "content": String(system || "") }].concat(msgs);
-            body = JSON.stringify({ "model": model, "max_tokens": maxTokens, "messages": full });
+            var obody = { "model": model, "max_tokens": maxTokens, "messages": full };
+            if (effort) obody.reasoning_effort = effort;
+            body = JSON.stringify(obody);
             argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
                 "-H", "Authorization: Bearer " + key,
                 "-H", "content-type: application/json",
@@ -450,6 +540,16 @@ Item {
             onStreamFinished: {
                 root.chatting = false;
                 var raw = String(text || "");
+                // The CLI providers return plain text, not JSON.
+                if (root._chatProvider === "cli") {
+                    var ans = raw.replace(/^\s+|\s+$/g, "");
+                    if (!ans) {
+                        root.chatError("The AI CLI returned nothing — check that it's installed, on PATH, and signed in.");
+                        return;
+                    }
+                    root.chatDone(ans);
+                    return;
+                }
                 if (raw.length === 0) {
                     root.chatError("Could not read the model's reply — check the config and key.");
                     return;
@@ -503,7 +603,9 @@ Item {
         onExited: code => {
             if (code !== 0 && root.chatting) {
                 root.chatting = false;
-                root.chatError("The AI request failed — check your connection and endpoint.");
+                root.chatError(root._chatProvider === "cli"
+                    ? "The AI CLI didn't run — check that it's installed and on PATH, or set \"bin\" to its full path in ai.json."
+                    : "The AI request failed — check your connection and endpoint.");
             }
         }
     }
@@ -553,6 +655,37 @@ Item {
         atomicWrites: true
         onLoaded: root._loadRecents(text())
         onLoadFailed: root.recents = []
+    }
+
+    // -------------------------------------------------------------- ui state
+    //
+    // Sidebar widths the user has dragged, kept beside recents so the layout
+    // comes back the way they left it. View state, but persisted here with the
+    // rest of the state files so the view needs no file machinery of its own.
+    property var uiState: ({})
+
+    function saveUiState(obj) {
+        root.uiState = (obj && typeof obj === "object" && !Array.isArray(obj)) ? obj : ({});
+        uiStateFile.setText(JSON.stringify(root.uiState));
+    }
+
+    function _loadUiState(raw) {
+        try {
+            var p = JSON.parse(raw || "{}");
+            root.uiState = (p && typeof p === "object" && !Array.isArray(p)) ? p : ({});
+        } catch (e) {
+            root.uiState = ({});
+        }
+    }
+
+    FileView {
+        id: uiStateFile
+        path: root.stateDir + "/tmm-ui.json"
+        watchChanges: false
+        printErrors: false
+        atomicWrites: true
+        onLoaded: root._loadUiState(text())
+        onLoadFailed: root.uiState = ({})
     }
 
     // -- fetchers: one declarative Process per endpoint. --

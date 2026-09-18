@@ -115,11 +115,17 @@ Optional, and off by default. Press `Ctrl+K` in the window to try it — with
 nothing configured it still answers in retrieval mode (relevant manual
 sections plus clickable source chips).
 
-To turn on real conversational answers, bring your own LLM key: create
-`~/.config/tmm/ai.json` with your `provider` (`openai` or `anthropic`),
-`baseUrl` (for `openai`-compatible endpoints, including local Ollama/LM
-Studio), `apiKey` and `model`. It hot-reloads, so no restart is needed. See
-the [README's AI study chat section](README.md#ai-study-chat-bring-your-own-key)
+To turn on real conversational answers, open the chat and press `Ctrl+,` (or
+click the gear in its header) for a **settings form** — pick a provider, fill in
+its fields, and Save. No file editing required. It writes `~/.config/tmm/ai.json`.
+
+Rather edit the file directly? Use your own LLM key (`provider` `"openai"` or
+`"anthropic"`, plus `baseUrl`, `apiKey`, `model`), a local model (Ollama/LM
+Studio), or — if you have a Claude, ChatGPT, or Cursor subscription — a local
+agent CLI (`{ "provider": "claude-cli" }`, `"codex"`, `"cursor"`, or
+`"opencode"`) to run answers on your subscription with no API key. It
+hot-reloads, so no restart is needed. See the
+[README's AI study chat section](README.md#ai-study-chat-bring-your-own-key)
 for the full field list and example configs.
 
 ## Troubleshooting
@@ -157,8 +163,9 @@ for the full field list and example configs.
   alongside `Panel.qml`. A broken image in the header means `logo.png` was
   left behind.
 - No `python3`/`jq`: raw JSON output is the expected fallback.
-- Caches: phase markdown, diagram SVGs and AI answers in `~/.cache/tmm/`, recents in
-  `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.
+- Caches: phase markdown, diagram SVGs and AI answers in `~/.cache/tmm/`; recents in
+  `~/.local/state/omarchy/tmm-recents.json` and saved sidebar widths in
+  `~/.local/state/omarchy/tmm-ui.json`. All safe to delete.
 - Menu entry still there after deleting the plugin? It lives in Omarchy's
   shared menu file, not in the plugin folder: `tmm-menu remove && omarchy menu
   refresh`. `tmm-menu status` lists what that file currently holds.
@@ -169,7 +176,7 @@ for the full field list and example configs.
 tmm-menu remove && omarchy menu refresh
 omarchy plugin remove tmm.manual
 rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
-rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json
+rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json ~/.local/state/omarchy/tmm-ui.json
 ```
 
 Then remove the `Missing Manual` lines from `~/.config/hypr/bindings.lua`.

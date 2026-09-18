@@ -74,18 +74,34 @@ Item {
     // window and the left list folds away (so the reader keeps the centre);
     // when compact it covers the content area like a mode.
     property bool chatOpen: false
-    readonly property real chatWidth: Math.max(Style.space(320),
+    // The chat dock's width. Its natural size is a third of the window, clamped;
+    // once the user drags its edge, chatWidthOverride wins (0 means "unset").
+    // Either way it is clamped so the reader keeps a readable column beside it.
+    property real chatWidthOverride: 0
+    readonly property real chatWidthNatural: Math.max(Style.space(320),
         Math.min(Style.space(420), win.width * 0.34))
+    readonly property real chatWidth: {
+        var w = root.chatWidthOverride > 0 ? root.chatWidthOverride : root.chatWidthNatural;
+        var max = (win.width - root.pad * 2) - Style.space(360);
+        return Math.max(Style.space(300), Math.min(Math.max(max, Style.space(300)), w));
+    }
     readonly property bool showLeft: root.wide && !root.chatOpen
         && (!root.readingMode || !root.sidebarHidden)
     // True whenever the left column occupies space: the single column when
     // compact, the left pane when wide-and-shown.
     readonly property bool leftColumnVisible: !root.wide || root.showLeft
 
-    // Width of the left column in wide mode: two-fifths of the body, but never
-    // so narrow the results stop being readable.
-    readonly property real leftWidth: Math.max(Style.space(320),
+    // Width of the left column in wide mode: two-fifths of the body by default,
+    // or whatever the user dragged the divider to (leftWidthOverride, 0 = unset).
+    // Clamped both ways so neither the list nor the reader can be squeezed out.
+    property real leftWidthOverride: 0
+    readonly property real leftWidthNatural: Math.max(Style.space(320),
         (win.width - root.pad * 2) * 0.4)
+    readonly property real leftWidth: {
+        var w = root.leftWidthOverride > 0 ? root.leftWidthOverride : root.leftWidthNatural;
+        var max = (win.width - root.pad * 2) - Style.space(360);
+        return Math.max(Style.space(240), Math.min(Math.max(max, Style.space(240)), w));
+    }
 
     // In wide mode the left column keeps showing the list you came from while
     // you read on the right, so its contents follow the *browsing* context,
@@ -117,6 +133,28 @@ Item {
         root.chatOpen = false;
         Qt.callLater(function () { keyCatcher.forceActiveFocus(); });
     }
+
+    // ---------------------------------------------------- persisted widths
+    //
+    // Apply the saved sidebar widths once, when the state file has loaded (it
+    // arrives asynchronously, so this is driven off uiState changing as well as
+    // component completion). Writing back happens on drag release.
+    property bool _uiApplied: false
+    function _applyUiState() {
+        if (root._uiApplied) return;
+        var u = app.uiState || ({});
+        var got = false;
+        if (Number(u.leftWidth) > 0) { root.leftWidthOverride = Number(u.leftWidth); got = true; }
+        if (Number(u.chatWidth) > 0) { root.chatWidthOverride = Number(u.chatWidth); got = true; }
+        if (got) root._uiApplied = true;
+    }
+    function _persistWidths() {
+        app.saveUiState({
+            "leftWidth": Math.round(root.leftWidth),
+            "chatWidth": Math.round(root.chatWidth)
+        });
+    }
+    Component.onCompleted: root._applyUiState()
 
     // ------------------------------------------------------ host lifecycle
 
@@ -170,6 +208,9 @@ Item {
         }
         function onChatChanged() {
             chatDock.scrollToBottom();
+        }
+        function onUiStateChanged() {
+            root._applyUiState();
         }
     }
 
@@ -320,7 +361,9 @@ Item {
         Item {
             id: keyCatcher
             anchors.fill: parent
-            focus: true
+            // Release focus while the chat dock is open so its text field can
+            // hold it -- otherwise a stray keystroke lands on the reader.
+            focus: !root.chatOpen
             Keys.priority: Keys.BeforeItem
             Keys.onPressed: event => root.handleKey(event)
         }
@@ -577,6 +620,9 @@ Item {
                 busy: app.chatBusy
                 errorText: app.chatError
                 aiReady: app.aiReady
+                codeDark: root.isDark
+                aiConfig: app.aiConfig
+                defaultSystemPrompt: app.defaultSystemPrompt
 
                 background: root.background
                 foreground: root.foreground
@@ -591,6 +637,72 @@ Item {
                 onSourceActivated: (s, p) => app.openChatSource(s, p)
                 onCloseRequested: root.closeChat()
                 onClearRequested: app.clearChat()
+                onSaveSettings: cfg => app.saveAiConfig(cfg)
+            }
+
+            // ----------------------------------------------- resize handles
+            //
+            // Thin drag strips sitting over each column divider. The left one
+            // widens/narrows the list column; the right one the chat dock. The
+            // reader is anchored between them, so it reflows as they move. Both
+            // map the cursor into body coordinates (robust while the strip
+            // itself slides with the divider), clamp through the width getters,
+            // and persist on release. Wide mode only, and the list and dock are
+            // never both shown, so the two never fight over the reader's room.
+            MouseArea {
+                id: leftHandle
+                visible: root.showLeft
+                z: 50
+                width: Style.space(10)
+                x: root.leftWidth - width / 2
+                anchors.top: parent.top
+                anchors.bottom: footer.top
+                anchors.bottomMargin: root.gap
+                cursorShape: Qt.SplitHCursor
+                hoverEnabled: true
+                property real _startW: 0
+                property real _startX: 0
+                onPressed: mouse => {
+                    _startW = root.leftWidth;
+                    _startX = mapToItem(body, mouse.x, mouse.y).x;
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed) return;
+                    var cx = mapToItem(body, mouse.x, mouse.y).x;
+                    root.leftWidthOverride = _startW + (cx - _startX);
+                }
+                onReleased: {
+                    root.leftWidthOverride = root.leftWidth;   // snap to the clamped value
+                    root._persistWidths();
+                }
+            }
+
+            MouseArea {
+                id: chatHandle
+                visible: root.wide && root.chatOpen
+                z: 50
+                width: Style.space(10)
+                x: chatDock.x - width / 2
+                anchors.top: parent.top
+                anchors.bottom: footer.top
+                anchors.bottomMargin: root.gap
+                cursorShape: Qt.SplitHCursor
+                hoverEnabled: true
+                property real _startW: 0
+                property real _startX: 0
+                onPressed: mouse => {
+                    _startW = root.chatWidth;
+                    _startX = mapToItem(body, mouse.x, mouse.y).x;
+                }
+                onPositionChanged: mouse => {
+                    if (!pressed) return;
+                    var cx = mapToItem(body, mouse.x, mouse.y).x;
+                    root.chatWidthOverride = _startW - (cx - _startX);   // drag left = wider
+                }
+                onReleased: {
+                    root.chatWidthOverride = root.chatWidth;
+                    root._persistWidths();
+                }
             }
         }
     }
