@@ -356,6 +356,158 @@ Item {
         }
     }
 
+    // ---------------------------------------------------------- AI chat (BYOK)
+    //
+    // Bring-your-own-key: generation runs on the USER's own LLM, configured in
+    // ~/.config/tmm/ai.json. With no key the Controller degrades to grounded
+    // retrieval and never calls this. The request is built as a curl ARGV array
+    // -- never `sh -c` -- so the key and the JSON body are literal argv words:
+    // nothing is interpolated into a shell string, so there is no injection and
+    // no escaping to get wrong.
+
+    // { provider, baseUrl, apiKey, model, maxTokens }
+    property var aiConfig: ({})
+    property bool chatting: false
+    // Remembered across the request so the response is parsed for the right
+    // provider even if the config file changes mid-flight.
+    property string _chatProvider: ""
+
+    signal chatDone(string text)
+    signal chatError(string msg)
+
+    function _parseAiConfig(raw) {
+        try {
+            var c = JSON.parse(raw || "{}");
+            root.aiConfig = (c && typeof c === "object" && !Array.isArray(c)) ? c : ({});
+        } catch (e) {
+            root.aiConfig = ({});
+        }
+    }
+
+    function _aiKey() {
+        return (root.aiConfig && root.aiConfig.apiKey) || Quickshell.env("TMM_AI_KEY") || "";
+    }
+
+    readonly property bool aiReady: !!(_aiKey() && aiConfig.model && aiConfig.provider)
+
+    FileView {
+        id: aiConfigFile
+        path: Quickshell.env("HOME") + "/.config/tmm/ai.json"
+        watchChanges: true
+        printErrors: false
+        onLoaded: root._parseAiConfig(text())
+        onLoadFailed: root.aiConfig = ({})
+    }
+
+    // provider-agnostic. `system` is a string; `messages` a JS array of
+    // { role: "user"|"assistant", content: "..." }.
+    function chat(system, messages) {
+        if (!root.aiReady) { root.chatError("No AI key configured."); return; }
+        var cfg = root.aiConfig || ({});
+        var key = _aiKey();
+        var provider = String(cfg.provider || "");
+        var model = String(cfg.model || "");
+        var maxTokens = Number(cfg.maxTokens) > 0 ? Number(cfg.maxTokens) : 1024;
+        var msgs = Array.isArray(messages) ? messages : [];
+        var argv, body, url;
+
+        if (provider === "anthropic") {
+            url = (cfg.baseUrl || "https://api.anthropic.com") + "/v1/messages";
+            body = JSON.stringify({
+                "model": model, "max_tokens": maxTokens,
+                "system": String(system || ""), "messages": msgs
+            });
+            argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
+                "-H", "x-api-key: " + key,
+                "-H", "anthropic-version: 2023-06-01",
+                "-H", "content-type: application/json",
+                "-d", body];
+            root._chatProvider = "anthropic";
+        } else {
+            // OpenAI-compatible: OpenAI, OpenRouter, Groq, Ollama, LM Studio, …
+            var base = String(cfg.baseUrl || "");
+            if (!base) {
+                root.chatError("No AI endpoint configured — set baseUrl for an OpenAI-compatible provider.");
+                return;
+            }
+            url = /\/chat\/completions$/.test(base) ? base : base.replace(/\/$/, "") + "/chat/completions";
+            var full = [{ "role": "system", "content": String(system || "") }].concat(msgs);
+            body = JSON.stringify({ "model": model, "max_tokens": maxTokens, "messages": full });
+            argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
+                "-H", "Authorization: Bearer " + key,
+                "-H", "content-type: application/json",
+                "-d", body];
+            root._chatProvider = "openai";
+        }
+
+        root.chatting = true;
+        _run(chatProc, argv);
+    }
+
+    Process {
+        id: chatProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                root.chatting = false;
+                var raw = String(text || "");
+                if (raw.length === 0) {
+                    root.chatError("Could not read the model's reply — check the config and key.");
+                    return;
+                }
+                var d;
+                try { d = JSON.parse(raw); }
+                catch (e) {
+                    root.chatError("Could not read the model's reply — check the config and key.");
+                    return;
+                }
+                if (!d || typeof d !== "object") {
+                    root.chatError("Could not read the model's reply — check the config and key.");
+                    return;
+                }
+
+                if (root._chatProvider === "anthropic") {
+                    if (d.type === "error" || d.error) {
+                        var em = d.error && (d.error.message || d.error.type);
+                        root.chatError(String(em || "The AI request was rejected."));
+                        return;
+                    }
+                    if (d.stop_reason === "refusal") {
+                        root.chatError("The model declined to answer that.");
+                        return;
+                    }
+                    var out = "";
+                    var parts = Array.isArray(d.content) ? d.content : [];
+                    for (var i = 0; i < parts.length; i++) {
+                        if (parts[i] && parts[i].type === "text") out += String(parts[i].text || "");
+                    }
+                    if (!out) {
+                        root.chatError("Could not read the model's reply — check the config and key.");
+                        return;
+                    }
+                    root.chatDone(out);
+                } else {
+                    if (d.error) { root.chatError(String(d.error.message || d.error)); return; }
+                    var choices = Array.isArray(d.choices) ? d.choices : [];
+                    var content = (choices.length > 0 && choices[0] && choices[0].message)
+                        ? choices[0].message.content : "";
+                    var otext = String(content || "");
+                    if (!otext) {
+                        root.chatError("Could not read the model's reply — check the config and key.");
+                        return;
+                    }
+                    root.chatDone(otext);
+                }
+            }
+        }
+        stderr: StdioCollector {}
+        onExited: code => {
+            if (code !== 0 && root.chatting) {
+                root.chatting = false;
+                root.chatError("The AI request failed — check your connection and endpoint.");
+            }
+        }
+    }
+
     // ------------------------------------------------------------- recents
     //
     // Reopening what you were last reading is the single most-used path in a

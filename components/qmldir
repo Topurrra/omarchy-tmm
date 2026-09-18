@@ -3,3 +3,4 @@ NoticeLine 1.0 NoticeLine.qml
 EmptyState 1.0 EmptyState.qml
 FooterHints 1.0 FooterHints.qml
 ProgressHairline 1.0 ProgressHairline.qml
+ChatDock 1.0 ChatDock.qml

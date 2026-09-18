@@ -52,6 +52,7 @@ The layout is responsive to the window's own width, not the monitor's:
 - **Keyboard-first throughout** — arrows, `Enter`, `Tab`, `n`/`p`, `g`/`G`, `Ctrl+T` to cycle the reading theme, `s` to fold the sidebar in wide mode; the mouse is optional everywhere
 - **Responsive layout** — a single column below ~900px window width, two columns (list + reader side by side) at or above it, so you can keep browsing while you read
 - **Ask the guides** — press `?` and get an answer written from the manual itself, with the phases it came from listed underneath; press `1`–`9` to open one. Answers are cached locally, so asking the same thing twice is free and instant
+- **AI study chat** — press `Ctrl+K` for a dock beside the reader that answers questions grounded in the guide you're on. It's bring-your-own-key: point it at your own LLM for real conversational answers, or leave it unconfigured and it still works as a retrieval helper — relevant sections plus clickable source chips
 - **Recents** on the empty search screen (`⇥` from home), shared between the window and the CLI, so "where was I" is one keystroke
 - **Phase navigation** with a reading-progress hairline and an estimated reading time
 - **Home is the catalog** — the window opens on the 27 categories, `Enter` drills into one, and typing filters locally (the catalog is fetched once per session)
@@ -70,6 +71,7 @@ The layout is responsive to the window's own width, not the monitor's:
 | `rsvg-convert` (optional) | Renders diagrams inline in the reader. Ships with Omarchy (librsvg); without it, diagrams fall back to a card |
 | `python3` (optional) | Pretty CLI output and terminal markdown rendering. Raw output is the fallback |
 | `less` or `$PAGER` (optional) | Used by `tmm open` |
+| An LLM API key, or a local model (optional) | Powers the AI study chat (`Ctrl+K`). Bring your own key in `~/.config/tmm/ai.json`, or point it at a local Ollama/LM Studio server. With no key, the chat still works in retrieval mode |
 
 ## Install
 
@@ -170,6 +172,7 @@ Typing always goes to the filter — there is no field to click into first.
 | Key | Action |
 |-----|--------|
 | `Ctrl+T` | Cycle the reading theme from anywhere: auto → light → dark |
+| `Ctrl+K` | Open/close the AI study chat dock, from any mode |
 | `s` | In the reader or Ask view, in wide layout (window ≥900px): fold the left list away for a full-width column; press again to bring it back. No effect in single-column layout, and not bound while typing a search/catalog filter |
 
 **Search**
@@ -231,6 +234,14 @@ month's budget is spent, the panel says so and search carries on working.
 Everything else keeps working mid-quiz — `n`/`p`, `y`, `o`, `Space` and `G` all still do
 what they do in the reader.
 
+**AI chat** (`Ctrl+K` to open, from any mode)
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send the message |
+| `Shift+Enter` | Newline, without sending |
+| `Esc` | Close the dock |
+
 **Catalog**
 
 The window opens here. Two levels: the category list, then the guides inside one.
@@ -263,6 +274,67 @@ Colors follow `NO_COLOR` and turn off when output is not a terminal. Point at a 
 ```bash
 TMM_BASE=http://localhost:5173 tmm search "networks"
 ```
+
+## AI study chat (bring your own key)
+
+Press `Ctrl+K` to open a chat dock beside the reader and ask questions about the
+guide you're currently reading. In wide windows (≥900px) it docks to the right
+next to the reader; in narrower windows it covers the content area. Either way
+the left list folds away while the dock is open.
+
+It's BYOK — bring your own key. Generation runs on an LLM **you** configure, so
+you pay your own provider (or run a local model for free, offline), and your
+key never leaves your machine — it's only ever sent to the endpoint you
+configured.
+
+### Turning it on
+
+Create `~/.config/tmm/ai.json`. It hot-reloads, so there's no need to restart
+the plugin or the shell after editing it.
+
+```jsonc
+// Local & free, via Ollama — no real key needed
+{ "provider": "openai", "baseUrl": "http://localhost:11434/v1", "apiKey": "ollama", "model": "llama3.1" }
+// OpenAI
+{ "provider": "openai", "baseUrl": "https://api.openai.com/v1", "apiKey": "sk-...", "model": "gpt-4o-mini" }
+// OpenRouter — can proxy Claude, GPT and others through one key
+{ "provider": "openai", "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "sk-or-...", "model": "anthropic/claude-sonnet-4.5" }
+// Anthropic, native Messages API
+{ "provider": "anthropic", "apiKey": "sk-ant-...", "model": "claude-sonnet-5" }
+```
+
+Fields:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `provider` | yes | `"openai"` (any OpenAI-compatible endpoint — OpenAI, OpenRouter, Groq, or a local Ollama/LM Studio server) or `"anthropic"` (Anthropic's native Messages API) |
+| `baseUrl` | for `openai` | The endpoint to call |
+| `apiKey` | yes | Can also come from the `TMM_AI_KEY` environment variable instead of the file |
+| `model` | yes | Model id/name as your provider expects it |
+| `maxTokens` | no | Defaults to 1024 |
+| `systemPrompt` | no | Overrides the default system prompt (see below) |
+
+### No key? Retrieval mode
+
+With no `ai.json`, or no key in it, the chat still works: it searches the
+manual and answers with the most relevant sections, each as a clickable
+source chip that opens in the reader, and the header shows a "retrieval
+mode — add a key for AI answers" hint. Add a key later and it upgrades to
+real conversational AI with nothing else to change.
+
+### Keys
+
+- `Ctrl+K` — open/close the chat dock, from any mode
+- `Enter` — send · `Shift+Enter` — newline · `Esc` — close the dock
+
+### The system prompt
+
+One system prompt is used for every provider. Its default lives in
+`Controller.qml` as the `defaultSystemPrompt` constant — that's the one
+place to edit the assistant's voice in code. You can override it without
+touching code by adding a `"systemPrompt"` string to `~/.config/tmm/ai.json`.
+Either way, the guide you're currently reading is automatically appended as
+context, so answers stay grounded in what's on screen.
 
 ## How it works
 

@@ -70,7 +70,13 @@ Item {
     // a full-width reading column; browsing always shows it. In compact mode
     // there is only ever one column, so the toggle does nothing there.
     property bool sidebarHidden: false
-    readonly property bool showLeft: root.wide
+    // The study-chat dock. When open in wide mode it takes the right of the
+    // window and the left list folds away (so the reader keeps the centre);
+    // when compact it covers the content area like a mode.
+    property bool chatOpen: false
+    readonly property real chatWidth: Math.max(Style.space(320),
+        Math.min(Style.space(420), win.width * 0.34))
+    readonly property bool showLeft: root.wide && !root.chatOpen
         && (!root.readingMode || !root.sidebarHidden)
     // True whenever the left column occupies space: the single column when
     // compact, the left pane when wide-and-shown.
@@ -99,6 +105,17 @@ Item {
     function cycleTheme() {
         root.themeMode = root.themeMode === "auto" ? "light"
             : root.themeMode === "light" ? "dark" : "auto";
+    }
+
+    // The dock owns its own focus/keys once open; the key catcher takes them
+    // back on close so reader/list navigation resumes.
+    function openChat() {
+        root.chatOpen = true;
+        Qt.callLater(function () { chatDock.focusInput(); });
+    }
+    function closeChat() {
+        root.chatOpen = false;
+        Qt.callLater(function () { keyCatcher.forceActiveFocus(); });
     }
 
     // ------------------------------------------------------ host lifecycle
@@ -150,6 +167,9 @@ Item {
         function onCatalogReplaced() {
             catalogList.cursorIndex = 0;
             catalogList.cursorActive = app.catalogModel.count > 0;
+        }
+        function onChatChanged() {
+            chatDock.scrollToBottom();
         }
     }
 
@@ -219,14 +239,14 @@ Item {
             return (reader.quizCount > 0 ? "q quiz  ·  " : "")
                 + "↑↓ scroll  ·  n/p phase  ·  y copy  ·  o browser"
                 + (root.wide ? "  ·  s sidebar" : "")
-                + "  ·  ^t theme  ·  ⎋ back";
+                + "  ·  ^k chat  ·  ^t theme  ·  ⎋ back";
         if (app.mode === "catalog")
             return app.catalogCategory
                 ? "type to filter  ·  ↑↓ move  ·  ⏎ read  ·  ⎋ categories  ·  ⇥ search"
                 : "type to filter  ·  ↑↓ move  ·  ⏎ open category  ·  ⇥ search  ·  ⎋ search";
         return "type to search  ·  ↑↓ move  ·  ⏎ open"
             + (app.canAsk() ? "  ·  ? ask" : "")
-            + "  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
+            + "  ·  ^k chat  ·  ⇥ catalog  ·  ^r random  ·  ⎋ close";
     }
 
     // ------------------------------------------------------- empty states
@@ -432,7 +452,8 @@ Item {
                 anchors.topMargin: root.wide ? 0 : (notice.visible ? 0 : root.gap)
                 anchors.left: root.showLeft ? vdiv.right : parent.left
                 anchors.leftMargin: root.showLeft ? root.colGap : 0
-                anchors.right: parent.right
+                anchors.right: (root.chatOpen && root.wide) ? chatDock.left : parent.right
+                anchors.rightMargin: (root.chatOpen && root.wide) ? root.colGap : 0
                 anchors.bottom: progressRule.top
                 anchors.bottomMargin: root.gap
                 visible: app.mode === "reader" && app.phaseBody.length > 0
@@ -457,7 +478,8 @@ Item {
                 anchors.topMargin: root.wide ? 0 : (notice.visible ? 0 : root.gap)
                 anchors.left: root.showLeft ? vdiv.right : parent.left
                 anchors.leftMargin: root.showLeft ? root.colGap : 0
-                anchors.right: parent.right
+                anchors.right: (root.chatOpen && root.wide) ? chatDock.left : parent.right
+                anchors.rightMargin: (root.chatOpen && root.wide) ? root.colGap : 0
                 anchors.bottom: progressRule.top
                 anchors.bottomMargin: root.gap
                 visible: app.mode === "ask" && app.askBody.length > 0
@@ -482,7 +504,8 @@ Item {
                 anchors.topMargin: root.wide ? 0 : (notice.visible ? 0 : root.gap)
                 anchors.left: root.showLeft ? vdiv.right : parent.left
                 anchors.leftMargin: root.showLeft ? root.colGap : 0
-                anchors.right: parent.right
+                anchors.right: (root.chatOpen && root.wide) ? chatDock.left : parent.right
+                anchors.rightMargin: (root.chatOpen && root.wide) ? root.colGap : 0
                 anchors.bottom: progressRule.top
                 anchors.bottomMargin: root.gap
                 visible: root.wide
@@ -512,7 +535,8 @@ Item {
                 anchors.bottomMargin: root.gap
                 anchors.left: root.showLeft ? vdiv.right : parent.left
                 anchors.leftMargin: root.showLeft ? root.colGap : 0
-                anchors.right: parent.right
+                anchors.right: (root.chatOpen && root.wide) ? chatDock.left : parent.right
+                anchors.rightMargin: (root.chatOpen && root.wide) ? root.colGap : 0
                 active: app.mode === "reader" || app.mode === "ask"
                 progress: app.mode === "reader" ? reader.progress
                     : app.mode === "ask" ? askReader.progress : 0
@@ -529,6 +553,44 @@ Item {
                 text: root.keyHints
                 foreground: root.foreground
                 fontFamily: root.fontFamily
+            }
+
+            // -------------------------------------------- study-chat dock
+            //
+            // Wide: pinned to the right, reader keeps the centre. Compact: it
+            // covers the whole content area (an opaque panel over the reader).
+            ChatDock {
+                id: chatDock
+                visible: root.chatOpen
+                anchors.top: root.wide ? parent.top : notice.bottom
+                anchors.topMargin: root.wide ? 0 : (notice.visible ? 0 : root.gap)
+                anchors.bottom: footer.top
+                anchors.bottomMargin: root.gap
+                // Anchor to the right only and size with `width`. Never set a
+                // left anchor: a ternary that clears one to `undefined` is
+                // flaky in QML and would leave the dock stretched full-width.
+                anchors.right: parent.right
+                width: root.wide ? root.chatWidth : parent.width
+                showDivider: root.wide
+
+                messages: app.chatMessages
+                busy: app.chatBusy
+                errorText: app.chatError
+                aiReady: app.aiReady
+
+                background: root.background
+                foreground: root.foreground
+                accent: root.accent
+                muted: root.muted
+                selectedBackground: root.selectedBackground
+                divider: root.divider
+                urgent: root.urgent
+                fontFamily: root.fontFamily
+
+                onSend: t => app.sendChat(t)
+                onSourceActivated: (s, p) => app.openChatSource(s, p)
+                onCloseRequested: root.closeChat()
+                onClearRequested: app.clearChat()
             }
         }
     }
@@ -562,6 +624,15 @@ Item {
         // Ctrl-guarded so it never collides with typing a filter.
         if (ctrl && event.key === Qt.Key_T) {
             root.cycleTheme();
+            event.accepted = true;
+            return;
+        }
+
+        // ^k toggles the study-chat dock from any mode. Ctrl-guarded so it never
+        // collides with filter typing; once open the dock owns its own keys.
+        if (ctrl && event.key === Qt.Key_K) {
+            if (root.chatOpen) root.closeChat();
+            else root.openChat();
             event.accepted = true;
             return;
         }

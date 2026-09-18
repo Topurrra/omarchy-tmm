@@ -109,6 +109,19 @@ Old caches are safe to drop if an update seems not to have taken:
 - `rsvg-convert` (librsvg) — renders diagrams inline in the reader. Ships with
   Omarchy; without it, diagrams fall back to a `Diagram · mermaid` card.
 
+## AI study chat (optional)
+
+Optional, and off by default. Press `Ctrl+K` in the window to try it — with
+nothing configured it still answers in retrieval mode (relevant manual
+sections plus clickable source chips).
+
+To turn on real conversational answers, bring your own LLM key: create
+`~/.config/tmm/ai.json` with your `provider` (`openai` or `anthropic`),
+`baseUrl` (for `openai`-compatible endpoints, including local Ollama/LM
+Studio), `apiKey` and `model`. It hot-reloads, so no restart is needed. See
+the [README's AI study chat section](README.md#ai-study-chat-bring-your-own-key)
+for the full field list and example configs.
+
 ## Troubleshooting
 
 - Validate the CLI: `sh -n ~/.local/bin/tmm && tmm --help`
