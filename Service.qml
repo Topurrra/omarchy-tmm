@@ -10,7 +10,13 @@ Item {
     id: root
 
     property string apiBase: Quickshell.env("TMM_BASE") || "https://themissingmanual.dev"
-    property string cacheDir: StandardPaths.writableLocation(StandardPaths.CacheLocation) + "/tmm"
+    // StandardPaths hands back a file:// URL on current Quickshell, but every
+    // consumer here is a shell command or an Image that wants a plain path --
+    // left as a URL it writes the whole cache under a literal "file:" folder
+    // and the reader's own "file://" prefix doubles up, so diagrams and the
+    // offline cache silently break. Strip the scheme once, here.
+    property string cacheDir: String(StandardPaths.writableLocation(StandardPaths.CacheLocation))
+        .replace(/^file:\/\//, "") + "/tmm"
     property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy"
     property int searchLimit: 24
     property int recentsLimit: 12
@@ -241,12 +247,19 @@ Item {
                         "h": Number(parts[2]) || 0
                     });
                 }
-                // Cache even an empty result: a phase whose diagrams the server
-                // could not render should not be refetched on every open.
-                var next = ({});
-                for (var k in root.diagramCache) next[k] = root.diagramCache[k];
-                next[root._diagKey] = list;
-                root.diagramCache = next;
+                // Only a non-empty result is cached. An empty one is usually
+                // transient -- a theme switch fired while the first fetch was
+                // still writing the page and single-flight killed it mid-stream,
+                // yielding zero figures -- and caching that would strand the
+                // diagram on its fallback card for the rest of the session.
+                // Re-extracting a genuinely diagram-less phase is cheap (the
+                // page is already on disk), so letting it retry costs nothing.
+                if (list.length > 0) {
+                    var next = ({});
+                    for (var k in root.diagramCache) next[k] = root.diagramCache[k];
+                    next[root._diagKey] = list;
+                    root.diagramCache = next;
+                }
                 root.diagramsDone(root._diagSlug, root._diagPhase, list);
             }
         }

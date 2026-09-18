@@ -18,17 +18,17 @@
 1. Install the plugin: `omarchy plugin add <url> --enable`
 
    Installing by hand instead? From a clone of this repo, copy **all** the QML and
-   JS files, the logo, and
-   the `bin/` directory — the overlay loads `Reader.qml`, `ResultList.qml`,
-   `Markdown.js` and `logo.png` as siblings, and the service runs
-   `bin/tmm-diagrams` from the plugin folder:
+   JS files, the `components/` directory, the logo, and
+   the `bin/` directory — the panel window (`Panel.qml`) loads `Controller.qml`,
+   `Reader.qml`, `ResultList.qml`, `Markdown.js`, `components/` and `logo.png`
+   as siblings, and the service runs `bin/tmm-diagrams` from the plugin folder:
 
    ```bash
    mkdir -p ~/.config/omarchy/plugins/tmm.manual
-   cp manifest.json Overlay.qml Reader.qml ResultList.qml Service.qml \
+   cp manifest.json Panel.qml Controller.qml Reader.qml ResultList.qml Service.qml \
       BarWidget.qml Model.js Markdown.js logo.png \
       ~/.config/omarchy/plugins/tmm.manual/
-   cp -r bin ~/.config/omarchy/plugins/tmm.manual/
+   cp -r components bin ~/.config/omarchy/plugins/tmm.manual/
    chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
    ```
 
@@ -106,6 +106,8 @@ Old caches are safe to drop if an update seems not to have taken:
 ## Optional
 
 - `wl-clipboard` — enables click-to-copy on code blocks and `y` in the reader.
+- `rsvg-convert` (librsvg) — renders diagrams inline in the reader. Ships with
+  Omarchy; without it, diagrams fall back to a `Diagram · mermaid` card.
 
 ## Troubleshooting
 
@@ -135,11 +137,12 @@ Old caches are safe to drop if an update seems not to have taken:
   means the page had no baked figures; an error means python3 is the problem.
 - Check the API: `curl -fsSL "$TMM_BASE/search.json?q=git" | head -c 200`
   (default `TMM_BASE=https://themissingmanual.dev`)
-- Overlay opens but looks unstyled: the shell could not resolve `qs.Commons`;
+- Window opens but looks unstyled: the shell could not resolve `qs.Commons`;
   confirm you are on v4 Quattro.
-- Missing files after a manual copy: the overlay needs `Reader.qml`,
-  `ResultList.qml`, `Markdown.js` and `logo.png` alongside `Overlay.qml`.
-  A broken image in the header means `logo.png` was left behind.
+- Missing files after a manual copy: the panel needs `Controller.qml`,
+  `Reader.qml`, `ResultList.qml`, `Markdown.js`, `components/` and `logo.png`
+  alongside `Panel.qml`. A broken image in the header means `logo.png` was
+  left behind.
 - No `python3`/`jq`: raw JSON output is the expected fallback.
 - Caches: phase markdown, diagram SVGs and AI answers in `~/.cache/tmm/`, recents in
   `~/.local/state/omarchy/tmm-recents.json`. Both are safe to delete.

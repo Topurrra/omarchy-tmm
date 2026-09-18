@@ -39,7 +39,15 @@ ListView {
             cursorActive = true;
             cursorIndex = delta < 0 ? count - 1 : 0;
         } else {
-            cursorIndex = (cursorIndex + delta + count) % count;
+            // If the cursor was scrolled out of view with the wheel, resume from
+            // the row you are actually looking at instead of snapping the whole
+            // list back to wherever the cursor happened to be left.
+            var top = indexAt(width / 2, contentY + 2);
+            var bottom = indexAt(width / 2, contentY + height - 2);
+            if (top >= 0 && bottom >= 0 && (cursorIndex < top || cursorIndex > bottom))
+                cursorIndex = delta < 0 ? bottom : top;
+            else
+                cursorIndex = (cursorIndex + delta + count) % count;
         }
         positionViewAtIndex(cursorIndex, ListView.Contain);
     }
@@ -150,13 +158,21 @@ ListView {
         }
 
         MouseArea {
+            id: rowHover
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onContainsMouseChanged: if (containsMouse) {
+            // Only let the pointer take the cursor while the list is still.
+            // During a wheel scroll the rows slide under a stationary pointer,
+            // and following that would make the highlight jump from row to row
+            // as the list moves rather than as you move.
+            function follow() {
+                if (list.moving || list.flicking) return;
                 list.cursorActive = true;
                 list.cursorIndex = row.index;
             }
+            onContainsMouseChanged: if (containsMouse) follow()
+            onPositionChanged: if (containsMouse) follow()
             onClicked: {
                 list.cursorActive = true;
                 list.cursorIndex = row.index;

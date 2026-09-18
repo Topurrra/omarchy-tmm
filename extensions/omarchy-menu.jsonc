@@ -6,7 +6,7 @@
   // these are Nerd Font glyphs, not icon names. A name like "search" would
   // show up as the word "search".
   //
-  // Every entry summons the overlay rather than shelling out, so the menu and
+  // Every entry summons the window rather than shelling out, so the menu and
   // the keybindings land you in the same place.
   "tmm": {"icon":"󰗚","label":"Missing Manual","title":"The Missing Manual"},
   "tmm.search": {"icon":"󰍉","label":"Search Guides","action":"omarchy-shell shell summon tmm.manual"},

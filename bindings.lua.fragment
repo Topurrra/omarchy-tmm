@@ -1,5 +1,7 @@
 -- Missing Manual keybinds: append to ~/.config/hypr/bindings.lua
--- The overlay is keyboard-first: type to search, arrows to move, Enter to read.
+-- The window is keyboard-first: type to search, arrows to move, Enter to read.
+-- Once open: Ctrl+T cycles the reading theme, and (at >=900px width) "s"
+-- toggles the sidebar in the reader/Ask view.
 local o = require("default.hypr.helpers")
 o.bind("SUPER + ALT + M", "Missing Manual", "omarchy-shell shell toggle tmm.manual")
 o.bind("SUPER + ALT + B", "Missing Manual catalog", "omarchy-shell shell summon tmm.manual '{\"catalog\":true}'")

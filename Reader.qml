@@ -18,9 +18,23 @@ Flickable {
     property color mutedColor: Util.alpha(foreground, 0.62)
     property string fontFamily: Style.font.menuFamily
     property int bodySize: Style.font.subtitle
+    // Which palette the code-block highlighter should use -- true for a
+    // dark card background, false for light. Panel sets this from the
+    // active theme; defaults dark since that's the common case.
+    property bool codeDark: true
+    // Normally the column hugs the left rail so it lines up with the header and
+    // footer. When the reader has the whole window to itself (the sidebar is
+    // folded away), that leaves a wide empty margin on the right, so the view
+    // centres the column instead for a more comfortable read.
+    property bool centered: false
     // Reading column: long lines are the fastest way to make a reader tiring,
-    // so the text stops well short of a wide card.
-    property int columnWidth: Math.min(width, Style.space(760))
+    // so the text stops well short of a wide card. Centred (full-window) mode
+    // additionally keeps a gutter on each side so the column never runs edge to
+    // edge, which is the whole point of centring it.
+    property int columnWidth: centered
+        ? Math.max(Style.space(360),
+              Math.min(Style.space(760), width - Style.space(180)))
+        : Math.min(width, Style.space(760))
     property string copiedText: ""
     // [{path, w, h}] from Service.getDiagrams, in the same order as the
     // `diagram` blocks. Empty until they arrive, or if they never do.
@@ -141,10 +155,10 @@ Flickable {
 
     Column {
         id: column
-        // Left-aligned rather than centred: the header, notice and footer all
-        // share the card's left rail, and an inset text column reads as a
-        // mistake next to them.
-        x: 0
+        // Normally left-aligned so it shares the card's left rail with the
+        // header, notice and footer; centred only when the reader owns the full
+        // window (sidebar folded away) and a left rail would strand the right.
+        x: reader.centered ? Math.max(0, (reader.width - reader.columnWidth) / 2) : 0
         width: reader.columnWidth
         spacing: 0
 
@@ -724,8 +738,8 @@ Flickable {
                     anchors.topMargin: Style.space(10) + codeRoot.labelHeight
                     anchors.leftMargin: Style.space(12)
                     anchors.rightMargin: Style.space(12)
-                    text: blk.text
-                    textFormat: Text.PlainText
+                    text: Markdown.highlightCode(blk.text, blk.lang, reader.codeDark)
+                    textFormat: Text.RichText
                     color: reader.foreground
                     font.family: reader.fontFamily
                     font.pixelSize: Style.font.bodySmall
