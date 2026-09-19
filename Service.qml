@@ -371,9 +371,20 @@ Item {
     // Remembered across the request so the response is parsed for the right
     // provider even if the config file changes mid-flight.
     property string _chatProvider: ""
+    // Handed to chatProc's stdin on start, so nothing sensitive -- the API key,
+    // the request body, or the whole conversation prompt -- is ever passed as a
+    // process argument (argv is world-readable via /proc/<pid>/cmdline).
+    property string _chatStdin: ""
 
     signal chatDone(string text)
     signal chatError(string msg)
+
+    // Escape a value for a curl `--config` quoted string: double every
+    // backslash, then every double-quote. curl un-escapes \\ and \" back, so a
+    // key or JSON body round-trips exactly with nothing shell- or curl-special.
+    function _curlEsc(s) {
+        return String(s).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+    }
 
     function _parseAiConfig(raw) {
         try {
@@ -414,23 +425,54 @@ Item {
     signal aiConfigSaved()
     signal aiConfigSaveError(string msg)
 
-    // Write ai.json from the settings form. The JSON is pretty-printed and
-    // passed as an argv word ($0) -- never interpolated into the shell -- so a
-    // key or a system prompt with any characters in it can never break out.
+    // The JSON to write next, streamed to aiWriteProc's stdin on start so an
+    // apiKey in it never appears in any process's argv. `_aiWriteObj` is the
+    // same value as an object, applied to aiConfig the moment the write
+    // succeeds -- an atomic rename gives the file a new inode, which can drop
+    // the FileView's change watch, so we never rely on it to see our own write.
+    property string _aiWritePayload: ""
+    property var _aiWriteObj: ({})
+
+    // Write ai.json securely. The config holds an apiKey, so:
+    //   * the config dir is created and pinned to 0700 (owner-only),
+    //   * the file is written through a fresh mktemp file (O_EXCL, so it never
+    //     follows a planted symlink) with umask 077 keeping it 0600, then
+    //     atomically renamed over the target -- a symlink at the path is
+    //     replaced, never written through,
+    //   * the JSON is streamed in on stdin, never passed as an argv word.
     // The watching FileView above reloads aiConfig on its own once written.
     function saveAiConfig(obj) {
         var json;
         try { json = JSON.stringify(obj || ({}), null, 2) + "\n"; }
         catch (e) { root.aiConfigSaveError("Could not encode the settings."); return; }
-        var cmd = "d=$(dirname \"$1\"); mkdir -p \"$d\" && printf '%s' \"$0\" > \"$1\"";
-        _run(aiWriteProc, ["sh", "-c", cmd, json, aiConfigFile.path]);
+        root._aiWritePayload = json;
+        root._aiWriteObj = (obj && typeof obj === "object" && !Array.isArray(obj)) ? obj : ({});
+        var cmd = "set -eu; p=\"$1\"; d=$(dirname \"$p\"); mkdir -p \"$d\"; "
+            + "chmod 700 \"$d\" 2>/dev/null || true; umask 077; "
+            + "t=$(mktemp \"$d/.ai.json.XXXXXX\") || exit 1; "
+            + "cat > \"$t\"; mv -f \"$t\" \"$p\"";
+        aiWriteProc.stdinEnabled = true;
+        _run(aiWriteProc, ["sh", "-c", cmd, "sh", aiConfigFile.path]);
     }
 
     Process {
         id: aiWriteProc
+        onStarted: {
+            write(root._aiWritePayload);
+            stdinEnabled = false;          // EOF
+            root._aiWritePayload = "";      // don't retain the key in memory
+        }
         onExited: code => {
-            if (code === 0) root.aiConfigSaved();
-            else root.aiConfigSaveError("Could not write " + aiConfigFile.path + ".");
+            if (code === 0) {
+                // Apply immediately (the watch may not survive the rename), then
+                // reload from disk to re-arm the FileView for later hand-edits.
+                root.aiConfig = root._aiWriteObj || ({});
+                root._aiWriteObj = ({});
+                aiConfigFile.reload();
+                root.aiConfigSaved();
+            } else {
+                root.aiConfigSaveError("Could not write " + aiConfigFile.path + ".");
+            }
         }
     }
 
@@ -452,8 +494,10 @@ Item {
             // CLI (Claude Code / OpenAI Codex / Cursor / opencode) in its
             // read-only, no-edit mode, run in an empty scratch dir, so the chat
             // can only ever produce text -- it can't touch the machine. The
-            // prompt goes in on stdin as $0 (never interpolated); model is $1
-            // and effort $2 (each provider uses whichever flags it supports).
+            // prompt is fed on the shell's stdin (`cat |`), never as an argv
+            // word, so the conversation is not exposed in /proc/<pid>/cmdline;
+            // model is $1 and effort $2 (benign, and each provider uses
+            // whichever flags it supports).
             var bin = String(cfg.bin || (provider === "codex" ? "codex"
                 : provider === "cursor" ? "cursor-agent"
                 : provider === "opencode" ? "opencode" : "claude"));
@@ -473,30 +517,37 @@ Item {
                 // the agent's own reasoning/exec chatter goes to /dev/null.
                 var eopt = effort ? " -c model_reasoning_effort=\"$2\"" : "";
                 cliCmd = pre + "F=\"" + scratch + "/codex.out\"; rm -f \"$F\"; "
-                    + "printf '%s' \"$0\" | timeout 150 '" + bin
+                    + "cat | timeout 150 '" + bin
                     + "' exec --sandbox read-only --skip-git-repo-check" + mopt + eopt
                     + " --output-last-message \"$F\" - >/dev/null 2>&1; "
                     + "cat \"$F\" 2>/dev/null; rm -f \"$F\"";
             } else if (provider === "cursor") {
-                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                cliCmd = pre + "cat | timeout 150 '" + bin
                     + "' -p --output-format text --mode ask --trust" + mopt + " 2>/dev/null";
             } else if (provider === "opencode") {
                 // opencode streams JSONL; a tiny helper pulls out the answer text.
-                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                cliCmd = pre + "cat | timeout 150 '" + bin
                     + "' run --format json" + mopt + " 2>/dev/null | '"
                     + _scriptPath("tmm-cli-extract") + "'";
             } else { // claude-cli
-                cliCmd = pre + "printf '%s' \"$0\" | timeout 150 '" + bin
+                cliCmd = pre + "cat | timeout 150 '" + bin
                     + "' -p --output-format text" + mopt
                     + " --disallowed-tools Bash Read Write Edit MultiEdit NotebookEdit "
                     + "WebFetch WebSearch Glob Grep Task TodoWrite";
             }
             root._chatProvider = "cli";
+            root._chatStdin = blob;
             root.chatting = true;
-            _run(chatProc, ["sh", "-c", cliCmd, blob, model, effort]);
+            chatProc.stdinEnabled = true;
+            _run(chatProc, ["sh", "-c", cliCmd, "-", model, effort]);
             return;
         }
 
+        // Hosted APIs. The key and the request body must not land in argv, so
+        // the whole request -- url, headers (with the key) and body -- is handed
+        // to curl as a `--config` file on stdin (`curl -K -`). Only the fixed,
+        // non-secret flags stay on the command line.
+        var cfgText;
         if (provider === "anthropic") {
             url = (cfg.baseUrl || "https://api.anthropic.com") + "/v1/messages";
             var abody = {
@@ -505,11 +556,13 @@ Item {
             };
             if (effort) abody.output_config = { "effort": effort };
             body = JSON.stringify(abody);
-            argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
-                "-H", "x-api-key: " + key,
-                "-H", "anthropic-version: 2023-06-01",
-                "-H", "content-type: application/json",
-                "-d", body];
+            cfgText = 'url = "' + _curlEsc(url) + '"\n'
+                + 'request = "POST"\n'
+                + 'max-time = 90\n'
+                + 'header = "x-api-key: ' + _curlEsc(key) + '"\n'
+                + 'header = "anthropic-version: 2023-06-01"\n'
+                + 'header = "content-type: application/json"\n'
+                + 'data-binary = "' + _curlEsc(body) + '"\n';
             root._chatProvider = "anthropic";
         } else {
             // OpenAI-compatible: OpenAI, OpenRouter, Groq, Ollama, LM Studio, …
@@ -523,19 +576,31 @@ Item {
             var obody = { "model": model, "max_tokens": maxTokens, "messages": full };
             if (effort) obody.reasoning_effort = effort;
             body = JSON.stringify(obody);
-            argv = ["curl", "-sS", "--max-time", "90", "-X", "POST", url,
-                "-H", "Authorization: Bearer " + key,
-                "-H", "content-type: application/json",
-                "-d", body];
+            cfgText = 'url = "' + _curlEsc(url) + '"\n'
+                + 'request = "POST"\n'
+                + 'max-time = 90\n'
+                + 'header = "Authorization: Bearer ' + _curlEsc(key) + '"\n'
+                + 'header = "content-type: application/json"\n'
+                + 'data-binary = "' + _curlEsc(body) + '"\n';
             root._chatProvider = "openai";
         }
 
+        root._chatStdin = cfgText;
         root.chatting = true;
-        _run(chatProc, argv);
+        chatProc.stdinEnabled = true;
+        _run(chatProc, ["curl", "-sS", "-K", "-"]);
     }
 
     Process {
         id: chatProc
+        // Everything sensitive (the API key, the request body, the CLI prompt)
+        // arrives here on stdin rather than in argv. Write it once the process
+        // is up, then close stdin so the reader sees EOF.
+        onStarted: {
+            if (root._chatStdin.length > 0) write(root._chatStdin);
+            stdinEnabled = false;
+            root._chatStdin = "";
+        }
         stdout: StdioCollector {
             onStreamFinished: {
                 root.chatting = false;
