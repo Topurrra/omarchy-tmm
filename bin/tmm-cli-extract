@@ -3,10 +3,14 @@
 stream (JSONL). opencode wraps its reply in step/tool events and a status
 header; the actual answer lives in `type:"text"` events (`part.text`). We
 concatenate those in order so a streamed or multi-part answer comes out whole,
-and print nothing if there was no text (the caller treats empty as an error)."""
+and print nothing if there was no text (the caller treats empty as an error).
+The answer is held to the same 2 MB ceiling as every other reply; past it we
+exit non-zero without printing, and the caller reports the reply as too large."""
 import sys, json
 
+LIMIT = 2 * 1024 * 1024
 out = []
+size = 0
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -20,6 +24,9 @@ for line in sys.stdin:
     part = ev.get("part")
     text = part.get("text") if isinstance(part, dict) else ev.get("text")
     if isinstance(text, str):
+        size += len(text.encode("utf-8"))
+        if size > LIMIT:
+            sys.exit(90)
         out.append(text)
 
 sys.stdout.write("".join(out))

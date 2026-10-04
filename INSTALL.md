@@ -21,7 +21,7 @@
    JS files, the `components/` directory, the logo, and
    the `bin/` directory — the panel window (`Panel.qml`) loads `Controller.qml`,
    `Reader.qml`, `ResultList.qml`, `Markdown.js`, `components/` and `logo.png`
-   as siblings, and the service runs `bin/tmm-diagrams` from the plugin folder:
+   as siblings, and the service runs `bin/tmm-cap` and `bin/tmm-diagrams` from the plugin folder:
 
    ```bash
    mkdir -p ~/.config/omarchy/plugins/tmm.manual
@@ -32,9 +32,9 @@
    chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
    ```
 
-   Leave `bin/` out and the plugin still works, but every diagram stays a
-   `Diagram · mermaid` card and nothing says why — a missing helper is not an
-   error the reader can show you.
+   `bin/` is required: every network request the service makes runs through
+   `bin/tmm-cap`, which caps the reply size and run time, and diagrams come from
+   `bin/tmm-diagrams`. Without it nothing loads.
 
 2. Rescan so the shell sees it: `omarchy-shell shell rescanPlugins`
 3. **If you copied by hand, or left `--enable` off: `omarchy plugin enable tmm.manual`**
@@ -99,7 +99,7 @@ Old caches are safe to drop if an update seems not to have taken:
 
 ## Requirements
 
-- `python3` — runs `bin/tmm-diagrams` (every rendered diagram) and `bin/tmm-menu`
+- `python3` runs `bin/tmm-cap` (every request), `bin/tmm-diagrams` (every rendered diagram) and `bin/tmm-menu`
   (the menu entries), and drives the CLI's pretty output. Omarchy ships it.
 - `curl` — every request the service makes.
 

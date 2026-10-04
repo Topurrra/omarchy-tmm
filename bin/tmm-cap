@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Run a command with a hard ceiling on its stdout and its run time.
+
+Usage:
+    tmm-cap <max-bytes> <timeout-secs> -- <command> [args...]
+
+The command runs in its own session (process group). Its stdout is read in
+chunks and held in memory up to <max-bytes>; the first byte past the ceiling,
+or the deadline passing, kills the whole group and reaps it. Output is written
+only when the command finished cleanly within both limits, so a caller never
+sees, parses, or caches a truncated or oversized reply.
+
+stdin is passed through untouched (curl -K - and the AI CLIs read it), and the
+command's stderr is discarded so nothing unbounded reaches the caller there.
+
+Exit codes: the command's own code on a clean run, 90 when stdout went over
+the ceiling, 124 on timeout, 143 when tmm-cap itself was told to stop.
+"""
+
+import os
+import signal
+import subprocess
+import sys
+import threading
+
+OVERFLOW = 90
+TIMEOUT = 124
+STOPPED = 143
+CHUNK = 65536
+
+
+def die_with_parent():
+    # If tmm-cap is SIGKILLed (no chance to clean up), the kernel still takes
+    # the command down with it. Linux only; elsewhere this is a no-op.
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl(1, signal.SIGKILL)  # PR_SET_PDEATHSIG
+    except Exception:
+        pass
+
+
+def usage():
+    sys.stderr.write("usage: tmm-cap <max-bytes> <timeout-secs> -- <command> [args...]\n")
+    sys.exit(2)
+
+
+def main():
+    argv = sys.argv[1:]
+    if len(argv) < 4 or argv[2] != "--":
+        usage()
+    try:
+        limit = int(argv[0])
+        deadline = float(argv[1])
+    except ValueError:
+        usage()
+    if limit <= 0 or deadline <= 0:
+        usage()
+
+    proc = subprocess.Popen(
+        argv[3:],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        preexec_fn=die_with_parent,
+    )
+    lock = threading.Lock()
+    reason = [None]
+
+    def kill_group(why):
+        with lock:
+            if reason[0] is None:
+                reason[0] = why
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def on_signal(signum, frame):
+        kill_group(STOPPED)
+        proc.wait()
+        os._exit(STOPPED)
+
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, on_signal)
+
+    timer = threading.Timer(deadline, kill_group, args=(TIMEOUT,))
+    timer.daemon = True
+    timer.start()
+
+    buf = bytearray()
+    out = proc.stdout
+    while True:
+        chunk = out.read1(CHUNK) if hasattr(out, "read1") else out.read(CHUNK)
+        if not chunk:
+            break
+        if len(buf) + len(chunk) > limit:
+            kill_group(OVERFLOW)
+            buf = bytearray()
+            break
+        buf += chunk
+    out.close()
+
+    code = proc.wait()
+    timer.cancel()
+
+    if reason[0] is not None:
+        sys.exit(reason[0])
+    if code != 0:
+        sys.exit(code if code > 0 else 128 - code)
+    sys.stdout.buffer.write(buf)
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    main()

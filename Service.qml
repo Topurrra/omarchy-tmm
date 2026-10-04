@@ -81,6 +81,23 @@ Item {
         proc.running = true;
     }
 
+    // Every network reply goes through bin/tmm-cap: it holds the output to a
+    // byte ceiling and a deadline, kills and reaps the whole process group the
+    // moment either is crossed, and prints nothing unless the run finished
+    // inside both. So no collector below ever holds more than `bytes`, and a
+    // cut-off reply is never parsed or cached. Exit 90 means "too large".
+    readonly property int _capOverflow: 90
+    readonly property int _mb: 1024 * 1024
+
+    function _capped(bytes, secs, cmd) {
+        return ["python3", _scriptPath("tmm-cap"), String(bytes), String(secs), "--"].concat(cmd);
+    }
+
+    // The same, as a prefix for a command inside an `sh -c` string.
+    function _capSh(bytes, secs) {
+        return "python3 '" + _scriptPath("tmm-cap") + "' " + bytes + " " + secs + " -- ";
+    }
+
     // Public URL of a phase, for "open in browser".
     function webUrl(slug, phase) {
         if (!slug) return apiBase;
@@ -91,16 +108,16 @@ Item {
         if (!query) { root.searchDone({ hits: [], suggestion: "" }); return; }
         _searchQ = query;
         searching = true;
-        _run(searchProc, ["curl", "-fsSL", "--max-time", "15",
-            _url("/search.json?q=" + encodeURIComponent(query) + "&limit=" + searchLimit)]);
+        _run(searchProc, _capped(_mb, 20, ["curl", "-fsSL", "--max-time", "15",
+            _url("/search.json?q=" + encodeURIComponent(query) + "&limit=" + searchLimit)]));
     }
 
     function getGuide(slug) {
         // Full-guide markdown is open; /api/guides/* is not public.
         // Emits guideDone({slug, markdown}).
         _guideSlug = slug;
-        _run(guideProc, ["curl", "-fsSL", "--max-time", "20",
-            _url("/guides/" + encodeURIComponent(slug) + ".md")]);
+        _run(guideProc, _capped(8 * _mb, 25, ["curl", "-fsSL", "--max-time", "20",
+            _url("/guides/" + encodeURIComponent(slug) + ".md")]));
     }
 
     function getCatalog() {
@@ -108,11 +125,11 @@ Item {
         // Emits catalogDone([{title, slug, summary: category}]).
         if (catalogCache.length > 0) { root.catalogDone(catalogCache); return; }
         loadingCatalog = true;
-        _run(catalogProc, ["curl", "-fsSL", "--max-time", "20", _url("/llms.txt")]);
+        _run(catalogProc, _capped(2 * _mb, 25, ["curl", "-fsSL", "--max-time", "20", _url("/llms.txt")]));
     }
 
     function getCheatSheet() {
-        _run(cheatProc, ["curl", "-fsSL", _url("/cheat-sheet.json")]);
+        _run(cheatProc, _capped(_mb, 25, ["curl", "-fsSL", "--max-time", "20", _url("/cheat-sheet.json")]));
     }
 
     // Body and headers come back in one stream, split by a record separator:
@@ -133,12 +150,17 @@ Item {
         _phaseSettled = false;
         var url = _url("/guides/" + _urlArg(slug) + "/" + phase + ".md");
         var base = _phaseBase(slug, phase);
-        // Drop the old sidecar first: curl leaves it untouched on a failed
-        // fetch, and stale bounds are worse than none.
+        // Body and headers land in temp files and replace the cached pair only
+        // after a clean, capped fetch, so a cut-off reply never reaches the
+        // offline cache. On failure nothing is printed and the reader falls
+        // back to that cache.
         _run(phaseProc, ["sh", "-c",
-            "mkdir -p '" + cacheDir + "' && rm -f '" + base + ".hdr' && "
-            + "curl -fsSL -D '" + base + ".hdr' --max-time 20 '" + url + "' | tee '" + base + ".md'"
-            + "; printf '\\036'; cat '" + base + ".hdr' 2>/dev/null"]);
+            "mkdir -p '" + cacheDir + "' || exit 1; "
+            + "if " + _capSh(4 * _mb, 25) + "curl -fsSL -D '" + base + ".hdr.tmp' --max-time 20 '"
+            + url + "' > '" + base + ".md.tmp'; then "
+            + "mv -f '" + base + ".md.tmp' '" + base + ".md' && mv -f '" + base + ".hdr.tmp' '" + base + ".hdr' "
+            + "&& cat '" + base + ".md' && printf '\\036' && cat '" + base + ".hdr'; "
+            + "else rm -f '" + base + ".md.tmp' '" + base + ".hdr.tmp'; exit 1; fi"]);
     }
 
     // x-phase-count / x-next-phase, set by the site for exactly this: the
@@ -215,12 +237,13 @@ Item {
         var stem = slug + "-" + phase;
         var html = cacheDir + "/" + stem + ".html";
         var url = _url("/guides/" + _urlArg(slug) + "/" + phase);
-        // Switching themes must not cost a round trip, so the page is teed on
-        // the first fetch and read back for every re-theme after it. The -s
-        // test matters: a failed first fetch leaves an empty file behind, and
-        // re-theming off that would show nothing forever.
-        var fetch = "mkdir -p '" + cacheDir + "' && curl -fsSL --max-time 20 '" + url
-            + "' | tee '" + html + "'";
+        // Switching themes must not cost a round trip, so the page is saved on
+        // the first fetch and read back for every re-theme after it. It is
+        // kept only after a clean, capped fetch; the -s test still guards an
+        // empty file left by an older version.
+        var fetch = "{ mkdir -p '" + cacheDir + "' && " + _capSh(8 * _mb, 25)
+            + "curl -fsSL --max-time 20 '" + url + "' > '" + html + ".tmp' && mv -f '"
+            + html + ".tmp' '" + html + "' && cat '" + html + "' || rm -f '" + html + ".tmp'; }";
         var source = _htmlSeen[stem]
             ? "if [ -s '" + html + "' ]; then cat '" + html + "'; else " + fetch + "; fi"
             : fetch;
@@ -319,8 +342,10 @@ Item {
         // about showing you something it did not just ask for.
         _run(askProc, ["sh", "-c",
             "if [ -s '" + _askFile + "' ]; then printf 'c\\036'; cat '" + _askFile + "'; else "
-            + "printf 'n\\036'; mkdir -p '" + askDir + "' && curl -fsSL --max-time 25 '" + url + "'"
-            + " | tee '" + _askFile + "'; fi"]);
+            + "printf 'n\\036'; mkdir -p '" + askDir + "' && " + _capSh(_mb, 30)
+            + "curl -fsSL --max-time 25 '" + url + "' > '" + _askFile + ".tmp' && mv -f '"
+            + _askFile + ".tmp' '" + _askFile + "' && cat '" + _askFile + "' || rm -f '"
+            + _askFile + ".tmp'; fi"]);
     }
 
     function clearAskCache() { Quickshell.execDetached(["sh", "-c", "rm -rf '" + askDir + "'"]); }
@@ -360,10 +385,9 @@ Item {
     //
     // Bring-your-own-key: generation runs on the USER's own LLM, configured in
     // ~/.config/tmm/ai.json. With no key the Controller degrades to grounded
-    // retrieval and never calls this. The request is built as a curl ARGV array
-    // -- never `sh -c` -- so the key and the JSON body are literal argv words:
-    // nothing is interpolated into a shell string, so there is no injection and
-    // no escaping to get wrong.
+    // retrieval and never calls this. The key, the request body and the prompt
+    // travel on stdin, never in argv, and the reply comes back through
+    // bin/tmm-cap, so its size and run time are bounded.
 
     // { provider, baseUrl, apiKey, model, maxTokens }
     property var aiConfig: ({})
@@ -375,6 +399,10 @@ Item {
     // the request body, or the whole conversation prompt -- is ever passed as a
     // process argument (argv is world-readable via /proc/<pid>/cmdline).
     property string _chatStdin: ""
+    // Ceiling on a single reply, enforced by bin/tmm-cap while it streams in.
+    // Far above any real answer; it only exists so a misbehaving or hostile
+    // endpoint cannot grow the long-lived shell's memory without bound.
+    readonly property int _chatCap: 2 * _mb
 
     signal chatDone(string text)
     signal chatError(string msg)
@@ -539,7 +567,7 @@ Item {
             root._chatStdin = blob;
             root.chatting = true;
             chatProc.stdinEnabled = true;
-            _run(chatProc, ["sh", "-c", cliCmd, "-", model, effort]);
+            _run(chatProc, _capped(root._chatCap, 160, ["sh", "-c", cliCmd, "-", model, effort]));
             return;
         }
 
@@ -588,7 +616,7 @@ Item {
         root._chatStdin = cfgText;
         root.chatting = true;
         chatProc.stdinEnabled = true;
-        _run(chatProc, ["curl", "-sS", "-K", "-"]);
+        _run(chatProc, _capped(root._chatCap, 95, ["curl", "-sS", "-K", "-"]));
     }
 
     Process {
@@ -603,20 +631,15 @@ Item {
         }
         stdout: StdioCollector {
             onStreamFinished: {
-                root.chatting = false;
                 var raw = String(text || "");
+                // tmm-cap prints nothing on an overflow, a timeout or a failed
+                // run, so an empty stream is left for onExited, which has the
+                // exit code to tell those apart.
+                if (raw.replace(/^\s+|\s+$/g, "").length === 0) return;
+                root.chatting = false;
                 // The CLI providers return plain text, not JSON.
                 if (root._chatProvider === "cli") {
-                    var ans = raw.replace(/^\s+|\s+$/g, "");
-                    if (!ans) {
-                        root.chatError("The AI CLI returned nothing — check that it's installed, on PATH, and signed in.");
-                        return;
-                    }
-                    root.chatDone(ans);
-                    return;
-                }
-                if (raw.length === 0) {
-                    root.chatError("Could not read the model's reply — check the config and key.");
+                    root.chatDone(raw.replace(/^\s+|\s+$/g, ""));
                     return;
                 }
                 var d;
@@ -666,11 +689,19 @@ Item {
         }
         stderr: StdioCollector {}
         onExited: code => {
-            if (code !== 0 && root.chatting) {
-                root.chatting = false;
-                root.chatError(root._chatProvider === "cli"
+            if (!root.chatting) return;
+            root.chatting = false;
+            var cli = root._chatProvider === "cli";
+            if (code === root._capOverflow) {
+                root.chatError("The model's reply was larger than 2 MB and was dropped.");
+            } else if (code !== 0) {
+                root.chatError(cli
                     ? "The AI CLI didn't run — check that it's installed and on PATH, or set \"bin\" to its full path in ai.json."
                     : "The AI request failed — check your connection and endpoint.");
+            } else {
+                root.chatError(cli
+                    ? "The AI CLI returned nothing — check that it's installed, on PATH, and signed in."
+                    : "Could not read the model's reply — check the config and key.");
             }
         }
     }

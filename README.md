@@ -70,7 +70,7 @@ The layout is responsive to the window's own width, not the monitor's:
 | `curl` | All network calls go through it |
 | `wl-copy` (optional) | Click-to-copy on code blocks and `y` in the reader |
 | `rsvg-convert` (optional) | Renders diagrams inline in the reader. Ships with Omarchy (librsvg); without it, diagrams fall back to a card |
-| `python3` (optional) | Pretty CLI output and terminal markdown rendering. Raw output is the fallback |
+| `python3` | Runs `bin/tmm-cap` (bounds every reply) and `bin/tmm-diagrams`. Ships with Omarchy. The CLI also uses it for pretty output, with raw output as the fallback |
 | `less` or `$PAGER` (optional) | Used by `tmm open` |
 | An LLM API key, or a local model (optional) | Powers the AI study chat (`Ctrl+K`). Bring your own key in `~/.config/tmm/ai.json`, or point it at a local Ollama/LM Studio server. With no key, the chat still works in retrieval mode |
 
@@ -94,7 +94,7 @@ looks exactly like a broken install.
 Copy every QML and JS file, the `components/` directory and `logo.png` — the panel
 window (`Panel.qml`) loads `Controller.qml`, `Reader.qml`, `ResultList.qml`,
 `Markdown.js`, the files under `components/` and the logo as siblings, `BarWidget.qml`
-is the bar button, and the service runs `bin/tmm-diagrams` from the plugin folder.
+is the bar button, and the service runs `bin/tmm-cap` and `bin/tmm-diagrams` from the plugin folder.
 
 ```bash
 mkdir -p ~/.config/omarchy/plugins/tmm.manual
@@ -109,9 +109,9 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable tmm.manual        # copied plugins start disabled
 ```
 
-Leave `bin/` out and the plugin still works, but every diagram stays a
-`Diagram · mermaid` card and nothing says why — a missing helper is not an
-error the reader can show you.
+`bin/` is required: every network request the service makes runs through
+`bin/tmm-cap`, which caps the reply size and run time, and diagrams come from
+`bin/tmm-diagrams`. Without it nothing loads.
 
 ### Option C: menu + keybindings (recommended)
 
@@ -402,6 +402,7 @@ components/                    # small shared QML pieces (header, footer hints, 
 logo.png                       # brand mark, shown in the header and on welcome
 Model.js                       # URL builders, catalog parsing, phase nav
 bin/tmm                        # terminal client with the same renderer
+bin/tmm-cap                    # runs a request with a byte ceiling and a deadline, kills its process group past either
 bin/tmm-diagrams               # pulls the baked mermaid SVGs out of a phase, re-themes and rasterises them
 bin/tmm-menu                   # merges/removes our entries in the shared menu file
 extensions/omarchy-menu.jsonc  # menu fragment
