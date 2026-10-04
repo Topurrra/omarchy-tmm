@@ -34,6 +34,22 @@ MENU_PATH = os.path.join(
 # Our keys: "tmm" and anything under it. Covers the older "tmm.guides" /
 # "tmm.cheat" names too, so an upgrade clears them out.
 OURS_KEY = re.compile(r"^tmm(\.[A-Za-z0-9_-]+)?$")
+# Where the fragment lives. Next to this script when it runs from the repo or
+# the plugin folder; from ~/.local/bin there is no repo beside it, so the
+# installed plugin folder is the fallback.
+PLUGIN_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "omarchy", "plugins", "tmm.manual",
+)
+
+
+def default_fragment():
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    for base in (here, PLUGIN_DIR):
+        path = os.path.join(base, "extensions", "omarchy-menu.jsonc")
+        if os.path.exists(path):
+            return path
+    return os.path.join(PLUGIN_DIR, "extensions", "omarchy-menu.jsonc")
 
 
 def strip_jsonc(raw):
@@ -244,9 +260,7 @@ def save(text, quiet=False):
 def main():
     ap = argparse.ArgumentParser(prog="tmm-menu", add_help=True)
     ap.add_argument("action", choices=["install", "remove", "status"])
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ap.add_argument("--fragment",
-                    default=os.path.join(here, "extensions", "omarchy-menu.jsonc"))
+    ap.add_argument("--fragment", default=None)
     args = ap.parse_args()
 
     current = read_menu()
@@ -273,8 +287,11 @@ def main():
         save(tidy(drop_ours(current)))
         return
 
+    if args.fragment is None:
+        args.fragment = default_fragment()
     if not os.path.exists(args.fragment):
-        raise SystemExit("tmm-menu: fragment not found: %s" % args.fragment)
+        raise SystemExit("tmm-menu: fragment not found: %s (is the plugin installed? "
+                         "or pass --fragment PATH)" % args.fragment)
     save(splice(drop_ours(current), fragment_lines(args.fragment)))
 
 

@@ -258,12 +258,15 @@ Item {
         var list = (s && s.recents) || [];
         resultsModel.clear();
         for (var i = 0; i < list.length; i++) {
+            // The row opens at phase_no, so it must carry the saved phase;
+            // the list already prints "· phase N" from it, so no badge.
+            var ph = Number(list[i].phase);
             resultsModel.append({
                 "title": list[i].title || list[i].slug,
                 "summary": "",
-                "badge": "phase " + list[i].phase,
+                "badge": "",
                 "guide_slug": list[i].slug,
-                "phase_no": 0
+                "phase_no": ph > 0 ? ph : 1
             });
         }
         root.showingRecents = resultsModel.count > 0;

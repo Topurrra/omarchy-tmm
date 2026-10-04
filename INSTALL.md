@@ -28,7 +28,7 @@
    cp manifest.json Panel.qml Controller.qml Reader.qml ResultList.qml Service.qml \
       BarWidget.qml Model.js Markdown.js logo.png \
       ~/.config/omarchy/plugins/tmm.manual/
-   cp -r components bin ~/.config/omarchy/plugins/tmm.manual/
+   cp -r components bin extensions ~/.config/omarchy/plugins/tmm.manual/
    chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
    ```
 
@@ -148,7 +148,7 @@ for the full field list and example configs.
   ```bash
   ls -l ~/.config/omarchy/plugins/tmm.manual/bin/tmm-diagrams   # exists, +x?
   command -v python3
-  curl -fsSL https://themissingmanual.dev/guides/deadlocks-explained/1 \
+  curl -fsSL https://themissingmanual.dev/guides/what-logic-actually-is/1 \
     | ~/.config/omarchy/plugins/tmm.manual/bin/tmm-diagrams /tmp/d test
   ```
 
@@ -177,6 +177,7 @@ tmm-menu remove && omarchy menu refresh
 omarchy plugin remove tmm.manual
 rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
 rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json ~/.local/state/omarchy/tmm-ui.json
+rm -rf ~/.config/tmm                         # AI chat settings, including any API key
 ```
 
 Then remove the `Missing Manual` lines from `~/.config/hypr/bindings.lua`.

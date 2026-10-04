@@ -18,11 +18,12 @@ Upstream library: 367 guides, 1,575 phases, 27 categories — from Git and opera
 
 ## It looks like your desktop
 
-The window takes every color, font, radius and spacing value from the theme you are running. There is not a single hardcoded color in it.
+The window takes its colors, font, radius and spacing from the theme you are running.
 
-- Surfaces use the `[menu]` theme tokens (`Color.menu.background`, `Color.menu.selectedText`, …), the same ones the Omarchy menu, clipboard and emoji pickers use — so a theme that styles those styles this too.
+- In **auto** mode the palette comes from the base theme tokens (`Color.background`, `Color.foreground`, `Color.accent`, `Color.urgent`); muted text, selection and dividers are derived from those. Diagrams are recolored from the same palette.
 - Corner radius follows Hyprland's `decoration:rounding`; spacing and type scale follow `[font]` and `[spacing]` in `shell.toml`, including `omarchy display text size`.
-- Press `Ctrl+T` any time to cycle the reading theme — **auto** (follows the desktop), **light**, **dark** — independent of the rest of the desktop, for guides that read better one way or the other.
+- Press `Ctrl+T` any time to cycle the reading theme — **auto** (follows the desktop), **light**, **dark** — independent of the rest of the desktop, for guides that read better one way or the other. The pinned **light** and **dark** modes use a fixed reading palette of their own, not the theme's colors.
+- Code blocks use a fixed syntax-highlight palette, one for dark backgrounds and one for light.
 
 Switch themes and the reader repaints with the desktop.
 
@@ -101,7 +102,7 @@ mkdir -p ~/.config/omarchy/plugins/tmm.manual
 cp manifest.json Panel.qml Controller.qml Reader.qml ResultList.qml Service.qml BarWidget.qml \
    Model.js Markdown.js logo.png \
    ~/.config/omarchy/plugins/tmm.manual/
-cp -r components bin ~/.config/omarchy/plugins/tmm.manual/
+cp -r components bin extensions ~/.config/omarchy/plugins/tmm.manual/
 chmod +x ~/.config/omarchy/plugins/tmm.manual/bin/*
 mkdir -p ~/.local/bin
 cp bin/tmm bin/tmm-menu ~/.local/bin/ && chmod +x ~/.local/bin/tmm ~/.local/bin/tmm-menu
@@ -491,6 +492,7 @@ tmm-menu remove && omarchy menu refresh     # menu entries
 omarchy plugin remove tmm.manual            # the plugin itself
 rm -f ~/.local/bin/tmm ~/.local/bin/tmm-menu
 rm -rf ~/.cache/tmm ~/.local/state/omarchy/tmm-recents.json ~/.local/state/omarchy/tmm-ui.json
+rm -rf ~/.config/tmm                         # AI chat settings, including any API key
 ```
 
 Then drop the `Missing Manual` lines from `~/.config/hypr/bindings.lua` and run
