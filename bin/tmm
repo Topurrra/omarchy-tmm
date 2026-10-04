@@ -9,7 +9,10 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/tmm"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
 RECENTS="$STATE_DIR/tmm-recents.json"
 
-command -v curl >/dev/null 2>&1 || { echo "tmm: curl is required but not installed" >&2; exit 1; }
+# True when a tool is on PATH.
+have() { command -v "$1" >/dev/null 2>&1; }
+
+have curl || { echo "tmm: curl is required but not installed" >&2; exit 1; }
 
 # ----------------------------------------------------------------- color
 #
@@ -78,7 +81,7 @@ split_slug_phase() {
 # the raw markdown when python3 is missing.
 render() {
   # $1: file, $2: "color" or "plain"
-  if ! command -v python3 >/dev/null 2>&1; then
+  if ! have python3; then
     cat "$1"
     return
   fi
@@ -156,11 +159,11 @@ cmd_search() {
   q="${1:-}"
   [ -n "$q" ] || { say_err "tmm: usage: tmm search <query>"; exit 1; }
   q_enc="$q"
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     q_enc="$(printf '%s' "$q" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read()))')"
   fi
   data="$(fetch "$BASE/search.json?q=$q_enc&limit=20")"
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     f="$(stash "$data")"
     TMM_A="$C_ACCENT" TMM_D="$C_DIM" TMM_R="$C_RESET" python3 - "$f" <<'PY'
 import json, os, sys
@@ -189,7 +192,7 @@ if not rows:
 if suggestion:
     print(f"{D}did you mean:{R} {suggestion}", file=sys.stderr)
 PY
-  elif command -v jq >/dev/null 2>&1; then
+  elif have jq; then
     printf '%s' "$data" | jq -r '(.hits // .) | .[] | "\(.guide_slug // .slug)/\(.phase_no // .phase // "")  \(.title)"'
   else
     printf '%s\n' "$data"
@@ -216,7 +219,7 @@ fetch_phase() {
 remember() {
   # Append to the same recents file the overlay reads, so the desktop and the
   # terminal share one history. $3 is the phase file, used for its title.
-  command -v python3 >/dev/null 2>&1 || return 0
+  have python3 || return 0
   mkdir -p "$STATE_DIR"
   TMM_SLUG="$1" TMM_PHASE="$2" TMM_FILE="$RECENTS" TMM_MD="${3:-}" python3 - <<'PY' 2>/dev/null || true
 import json, os, re, time
@@ -267,7 +270,7 @@ cmd_read() {
 }
 
 cmd_close() {
-  if command -v pkill >/dev/null 2>&1; then
+  if have pkill; then
     pkill -f "tmm open" || echo "tmm: no open tmm pager found"
   else
     echo "tmm: pkill not found; run: pkill -f 'tmm open'"
@@ -279,7 +282,7 @@ catalog_raw() { fetch "$BASE/llms.txt"; }
 
 cmd_list() {
   data="$(catalog_raw)"
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     f="$(stash "$data")"
     TMM_A="$C_ACCENT" TMM_D="$C_DIM" TMM_R="$C_RESET" python3 - "$f" <<'PY'
 import os, re, sys
@@ -306,7 +309,7 @@ PY
 
 cmd_random() {
   data="$(catalog_raw)"
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     printf '%s' "$data" | python3 -c '
 import random, re, sys
 guides = []
@@ -318,7 +321,7 @@ if not guides:
     sys.exit("tmm: catalog was empty")
 slug, title = random.choice(guides)
 print("%s  %s" % (slug, title))'
-  elif command -v shuf >/dev/null 2>&1; then
+  elif have shuf; then
     printf '%s\n' "$data" | grep -o "\[.*\](/guides/[^)]*)" | shuf -n 1 || true
   else
     say_err "tmm: random requires python3 (or shuf)"; exit 1
@@ -327,7 +330,7 @@ print("%s  %s" % (slug, title))'
 
 cmd_categories() {
   data="$(catalog_raw)"
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     printf '%s' "$data" | python3 -c '
 import sys
 for line in sys.stdin:
@@ -342,7 +345,7 @@ for line in sys.stdin:
 
 cmd_recent() {
   [ -s "$RECENTS" ] || { echo "tmm: nothing read yet"; return 0; }
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     TMM_A="$C_ACCENT" TMM_R="$C_RESET" python3 - "$RECENTS" <<'PY'
 import json, os, sys
 A, R = os.environ.get("TMM_A",""), os.environ.get("TMM_R","")
@@ -365,7 +368,7 @@ cmd_cheat() {
     say_err "tmm: try 'tmm search cheatsheet' or read a guide instead."
     exit 1
   fi
-  if command -v python3 >/dev/null 2>&1; then
+  if have python3; then
     printf '%s' "$data" | python3 -m json.tool
   else
     printf '%s\n' "$data"
