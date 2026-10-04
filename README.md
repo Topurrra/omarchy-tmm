@@ -297,8 +297,12 @@ subscription — no key, no per-token cost:
 - `"provider": "cursor"` — Cursor Agent (`cursor-agent`)
 - `"provider": "opencode"` — [opencode](https://opencode.ai) (`opencode`)
 
-Each runs its CLI in a read-only, no-edit mode inside a scratch directory, so the
-chat can only ever return text — it never touches your files. It's a little
+Each runs its CLI inside a scratch directory with its tools locked down, so the
+chat can only ever return text and never touches your files. Claude Code runs
+with no tools at all (`--tools '' --disallowedTools '*'`, no MCP servers).
+opencode runs as a dedicated `tmm-answer` agent with every permission set to
+`deny`, passed in `OPENCODE_CONFIG_CONTENT` so your own config can't re-enable
+a tool. Codex runs in its `read-only` sandbox, and Cursor in `ask` mode. It's a little
 slower (each reply spins the agent up) and needs that CLI installed, on your
 `PATH`, and signed in.
 

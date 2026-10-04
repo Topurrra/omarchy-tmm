@@ -404,6 +404,16 @@ Item {
     // endpoint cannot grow the long-lived shell's memory without bound.
     readonly property int _chatCap: 2 * _mb
 
+    // opencode permissions for the chat: "*" plus every tool key opencode
+    // knows, each set to deny, so a more specific allow from the user's own
+    // config can never win over the catch-all.
+    readonly property var _ocDenyAll: ({
+        "*": "deny", "read": "deny", "edit": "deny", "glob": "deny", "grep": "deny",
+        "list": "deny", "bash": "deny", "task": "deny", "external_directory": "deny",
+        "lsp": "deny", "skill": "deny", "todowrite": "deny", "question": "deny",
+        "webfetch": "deny", "websearch": "deny", "codesearch": "deny", "doom_loop": "deny"
+    })
+
     signal chatDone(string text)
     signal chatError(string msg)
 
@@ -553,15 +563,33 @@ Item {
                 cliCmd = pre + "cat | timeout 150 '" + bin
                     + "' -p --output-format text --mode ask --trust" + mopt + " 2>/dev/null";
             } else if (provider === "opencode") {
-                // opencode streams JSONL; a tiny helper pulls out the answer text.
-                cliCmd = pre + "cat | timeout 150 '" + bin
-                    + "' run --format json" + mopt + " 2>/dev/null | '"
+                // opencode's default Build agent can run commands and edit
+                // files, and the prompt carries fetched guide text, so it runs
+                // as our own agent with every tool denied instead. The config
+                // comes in through OPENCODE_CONFIG_CONTENT, which opencode
+                // applies after the global and project configs, so neither can
+                // hand a tool back. opencode streams JSONL; a tiny helper pulls
+                // out the answer text.
+                var ocCfg = JSON.stringify({
+                    "permission": root._ocDenyAll,
+                    "agent": { "tmm-answer": {
+                        "description": "Answers from the given text only. No tools.",
+                        "mode": "primary",
+                        "permission": root._ocDenyAll,
+                        "tools": { "*": false }
+                    } }
+                });
+                cliCmd = pre + "cat | OPENCODE_CONFIG_CONTENT='" + ocCfg + "' timeout 150 '" + bin
+                    + "' run --agent tmm-answer --format json" + mopt + " 2>/dev/null | '"
                     + _scriptPath("tmm-cli-extract") + "'";
             } else { // claude-cli
+                // No built-in tools (--tools ""), every tool including MCP ones
+                // removed (--disallowedTools "*"), no MCP servers from any
+                // config, and no skills or slash commands.
                 cliCmd = pre + "cat | timeout 150 '" + bin
                     + "' -p --output-format text" + mopt
-                    + " --disallowed-tools Bash Read Write Edit MultiEdit NotebookEdit "
-                    + "WebFetch WebSearch Glob Grep Task TodoWrite";
+                    + " --tools '' --disallowedTools '*' --strict-mcp-config"
+                    + " --disable-slash-commands --no-session-persistence";
             }
             root._chatProvider = "cli";
             root._chatStdin = blob;
