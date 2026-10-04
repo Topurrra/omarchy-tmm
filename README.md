@@ -131,7 +131,7 @@ cat bindings.lua.fragment >> ~/.config/hypr/bindings.lua
 `tmm-menu status` shows what is in that file, `tmm-menu remove` takes our
 entries back out, and every write keeps a `.bak` beside the original.
 
-See [INSTALL.md](INSTALL.md) for the short checklist and troubleshooting.
+See [QUICKSTART.md](QUICKSTART.md) for the short checklist and troubleshooting.
 
 ## Usage
 
